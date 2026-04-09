@@ -84,8 +84,9 @@ var sha256Codec = phpCodec{
 			ints[i] = u32toi32(binary.BigEndian.Uint32(goState[4+i*4:]))
 		}
 		// Buffer is at offset 36, up to 64 bytes, then len at end
-		totalLen := binary.BigEndian.Uint64(goState[len(goState)-8:])
-		lo, hi := u64toi32pair(totalLen)
+		// PHP stores bit count, Go stores byte count
+		bitCount := binary.BigEndian.Uint64(goState[len(goState)-8:]) * 8
+		lo, hi := u64toi32pair(bitCount)
 		ints[8] = lo
 		ints[9] = hi
 		buf := make([]byte, 64)
@@ -103,8 +104,8 @@ var sha256Codec = phpCodec{
 			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[i]))
 		}
 		copy(goState[36:], buf)
-		totalLen := i32pairtou64(ints[8], ints[9])
-		binary.BigEndian.PutUint64(goState[100:], totalLen)
+		// PHP stores bit count, Go stores byte count
+		binary.BigEndian.PutUint64(goState[100:], i32pairtou64(ints[8], ints[9])/8)
 		return goState, nil
 	},
 }
@@ -122,8 +123,7 @@ var sha224Codec = phpCodec{
 			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[i]))
 		}
 		copy(goState[36:], buf)
-		totalLen := i32pairtou64(ints[8], ints[9])
-		binary.BigEndian.PutUint64(goState[100:], totalLen)
+		binary.BigEndian.PutUint64(goState[100:], i32pairtou64(ints[8], ints[9])/8)
 		return goState, nil
 	},
 }
@@ -138,8 +138,8 @@ var sha1Codec = phpCodec{
 		for i := 0; i < 5; i++ {
 			ints[i] = u32toi32(binary.BigEndian.Uint32(goState[4+i*4:]))
 		}
-		totalLen := binary.BigEndian.Uint64(goState[len(goState)-8:])
-		lo, hi := u64toi32pair(totalLen)
+		bitCount := binary.BigEndian.Uint64(goState[len(goState)-8:]) * 8
+		lo, hi := u64toi32pair(bitCount)
 		ints[5] = lo
 		ints[6] = hi
 		buf := make([]byte, 64)
@@ -157,8 +157,7 @@ var sha1Codec = phpCodec{
 			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[i]))
 		}
 		copy(goState[24:], buf)
-		totalLen := i32pairtou64(ints[5], ints[6])
-		binary.BigEndian.PutUint64(goState[88:], totalLen)
+		binary.BigEndian.PutUint64(goState[88:], i32pairtou64(ints[5], ints[6])/8)
 		return goState, nil
 	},
 }
@@ -177,9 +176,9 @@ func makeSHA512Codec(magic string) phpCodec {
 				ints[i*2] = int32(uint32(v >> 32)) // hi first (PHP order)
 				ints[i*2+1] = int32(uint32(v))     // lo second
 			}
-			totalLen := binary.BigEndian.Uint64(goState[len(goState)-8:])
-			ints[16] = int32(uint32(totalLen))
-			ints[17] = int32(uint32(totalLen >> 32))
+			bitCount := binary.BigEndian.Uint64(goState[len(goState)-8:]) * 8
+			ints[16] = int32(uint32(bitCount))
+			ints[17] = int32(uint32(bitCount >> 32))
 			ints[18] = 0
 			ints[19] = 0
 			buf := make([]byte, 128)
@@ -197,8 +196,8 @@ func makeSHA512Codec(magic string) phpCodec {
 				binary.BigEndian.PutUint64(goState[4+i*8:], v)
 			}
 			copy(goState[68:], buf)
-			totalLen := uint64(uint32(ints[16])) | uint64(uint32(ints[17]))<<32
-			binary.BigEndian.PutUint64(goState[196:], totalLen)
+			bitCount := uint64(uint32(ints[16])) | uint64(uint32(ints[17]))<<32
+			binary.BigEndian.PutUint64(goState[196:], bitCount/8)
 			return goState, nil
 		},
 	}
@@ -214,11 +213,9 @@ var md5Codec = phpCodec{
 		ints := make([]int32, 22)
 		// Go MD5 binary: "md5\x01" + h[0..3] LE + buffer + len BE
 		totalLen := binary.BigEndian.Uint64(goState[len(goState)-8:])
-		// PHP stores count as bits
-		bitCount := totalLen * 8
-		lo, hi := u64toi32pair(bitCount)
-		ints[0] = lo // count lo (in bits)
-		ints[1] = hi // count hi
+		lo, hi := u64toi32pair(totalLen)
+		ints[0] = lo // byte count lo
+		ints[1] = hi // byte count hi
 		for i := 0; i < 4; i++ {
 			ints[2+i] = u32toi32(binary.LittleEndian.Uint32(goState[4+i*4:]))
 		}
@@ -237,9 +234,7 @@ var md5Codec = phpCodec{
 			binary.LittleEndian.PutUint32(goState[4+i*4:], i32tou32(ints[2+i]))
 		}
 		copy(goState[20:], buf)
-		// Convert bit count back to byte count
-		bitCount := i32pairtou64(ints[0], ints[1])
-		binary.BigEndian.PutUint64(goState[84:], bitCount/8)
+		binary.BigEndian.PutUint64(goState[84:], i32pairtou64(ints[0], ints[1]))
 		return goState, nil
 	},
 }

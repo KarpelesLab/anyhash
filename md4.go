@@ -30,7 +30,7 @@ func (d *md4digest) MarshalPHP() ([]int32, []byte) {
 	for i := 0; i < 4; i++ {
 		ints[i] = int32(d.s[i])
 	}
-	lo, hi := u64toi32pair(d.len)
+	lo, hi := u64toi32pair(d.len * 8)
 	ints[4] = lo
 	ints[5] = hi
 	buf := make([]byte, 64)
@@ -45,7 +45,7 @@ func (d *md4digest) UnmarshalPHP(state []int32, buf []byte) error {
 	for i := 0; i < 4; i++ {
 		d.s[i] = uint32(state[i])
 	}
-	d.len = i32pairtou64(state[4], state[5])
+	d.len = i32pairtou64(state[4], state[5]) / 8
 	copy(d.buf[:], buf)
 	return nil
 }
