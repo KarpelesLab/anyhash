@@ -24,11 +24,11 @@ const havalBlockSize = 128 // 1024 bits
 const havalVersion = 1
 
 type havalDigest struct {
-	s      [8]uint32   // hash state (fingerprint)
-	buf    [128]byte   // partial block buffer
-	len    uint64      // total bytes written
-	passes int         // 3, 4, or 5
-	size   int         // digest size in bits (128, 160, 192, 224, 256)
+	s      [8]uint32 // hash state (fingerprint)
+	buf    [128]byte // partial block buffer
+	len    uint64    // total bytes written
+	passes int       // 3, 4, or 5
+	size   int       // digest size in bits (128, 160, 192, 224, 256)
 }
 
 func newHaval(passes, sizeBits int) *havalDigest {

@@ -11,9 +11,9 @@ const md4BlockSize = 64
 const md4Size = 16
 
 type md4digest struct {
-	s   [4]uint32  // hash state (a, b, c, d)
-	buf [64]byte   // partial block buffer
-	len uint64     // total bytes written
+	s   [4]uint32 // hash state (a, b, c, d)
+	buf [64]byte  // partial block buffer
+	len uint64    // total bytes written
 }
 
 func newMD4() *md4digest {

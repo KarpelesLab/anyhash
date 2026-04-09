@@ -26,11 +26,11 @@ var md2S = [256]byte{
 }
 
 type md2digest struct {
-	state    [48]byte   // working state (X in the RFC)
-	checksum [16]byte   // running checksum (C in the RFC)
-	buf      [16]byte   // partial block buffer
-	bufLen   int        // bytes in buf
-	len      uint64     // total bytes written
+	state    [48]byte // working state (X in the RFC)
+	checksum [16]byte // running checksum (C in the RFC)
+	buf      [16]byte // partial block buffer
+	bufLen   int      // bytes in buf
+	len      uint64   // total bytes written
 }
 
 func newMD2() *md2digest {

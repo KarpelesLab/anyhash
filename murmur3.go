@@ -105,9 +105,9 @@ func fmix32(h uint32) uint32 {
 
 type murmur3cDigest struct {
 	h1, h2, h3, h4 uint32
-	buf             [16]byte
-	n               int
-	len             uint32
+	buf            [16]byte
+	n              int
+	len            uint32
 }
 
 func newMurmur3c() *murmur3cDigest {
@@ -152,17 +152,37 @@ func (d *murmur3cDigest) processBlock3c(b []byte) {
 
 	const c1, c2, c3, c4 = 0x239b961b, 0xab0e9789, 0x38b34ae5, 0xa1e38b93
 
-	k1 *= c1; k1 = bits.RotateLeft32(k1, 15); k1 *= c2; d.h1 ^= k1
-	d.h1 = bits.RotateLeft32(d.h1, 19); d.h1 += d.h2; d.h1 = d.h1*5 + 0x561ccd1b
+	k1 *= c1
+	k1 = bits.RotateLeft32(k1, 15)
+	k1 *= c2
+	d.h1 ^= k1
+	d.h1 = bits.RotateLeft32(d.h1, 19)
+	d.h1 += d.h2
+	d.h1 = d.h1*5 + 0x561ccd1b
 
-	k2 *= c2; k2 = bits.RotateLeft32(k2, 16); k2 *= c3; d.h2 ^= k2
-	d.h2 = bits.RotateLeft32(d.h2, 17); d.h2 += d.h3; d.h2 = d.h2*5 + 0x0bcaa747
+	k2 *= c2
+	k2 = bits.RotateLeft32(k2, 16)
+	k2 *= c3
+	d.h2 ^= k2
+	d.h2 = bits.RotateLeft32(d.h2, 17)
+	d.h2 += d.h3
+	d.h2 = d.h2*5 + 0x0bcaa747
 
-	k3 *= c3; k3 = bits.RotateLeft32(k3, 17); k3 *= c4; d.h3 ^= k3
-	d.h3 = bits.RotateLeft32(d.h3, 15); d.h3 += d.h4; d.h3 = d.h3*5 + 0x96cd1c35
+	k3 *= c3
+	k3 = bits.RotateLeft32(k3, 17)
+	k3 *= c4
+	d.h3 ^= k3
+	d.h3 = bits.RotateLeft32(d.h3, 15)
+	d.h3 += d.h4
+	d.h3 = d.h3*5 + 0x96cd1c35
 
-	k4 *= c4; k4 = bits.RotateLeft32(k4, 18); k4 *= c1; d.h4 ^= k4
-	d.h4 = bits.RotateLeft32(d.h4, 13); d.h4 += d.h1; d.h4 = d.h4*5 + 0x32ac3b17
+	k4 *= c4
+	k4 = bits.RotateLeft32(k4, 18)
+	k4 *= c1
+	d.h4 ^= k4
+	d.h4 = bits.RotateLeft32(d.h4, 13)
+	d.h4 += d.h1
+	d.h4 = d.h4*5 + 0x32ac3b17
 }
 
 func (d *murmur3cDigest) Sum(in []byte) []byte {
@@ -181,7 +201,10 @@ func (d *murmur3cDigest) Sum(in []byte) []byte {
 		fallthrough
 	case 13:
 		k4 ^= uint32(tail[12])
-		k4 *= c4; k4 = bits.RotateLeft32(k4, 18); k4 *= c1; h4 ^= k4
+		k4 *= c4
+		k4 = bits.RotateLeft32(k4, 18)
+		k4 *= c1
+		h4 ^= k4
 		fallthrough
 	case 12:
 		k3 ^= uint32(tail[11]) << 24
@@ -194,7 +217,10 @@ func (d *murmur3cDigest) Sum(in []byte) []byte {
 		fallthrough
 	case 9:
 		k3 ^= uint32(tail[8])
-		k3 *= c3; k3 = bits.RotateLeft32(k3, 17); k3 *= c4; h3 ^= k3
+		k3 *= c3
+		k3 = bits.RotateLeft32(k3, 17)
+		k3 *= c4
+		h3 ^= k3
 		fallthrough
 	case 8:
 		k2 ^= uint32(tail[7]) << 24
@@ -207,7 +233,10 @@ func (d *murmur3cDigest) Sum(in []byte) []byte {
 		fallthrough
 	case 5:
 		k2 ^= uint32(tail[4])
-		k2 *= c2; k2 = bits.RotateLeft32(k2, 16); k2 *= c3; h2 ^= k2
+		k2 *= c2
+		k2 = bits.RotateLeft32(k2, 16)
+		k2 *= c3
+		h2 ^= k2
 		fallthrough
 	case 4:
 		k1 ^= uint32(tail[3]) << 24
@@ -220,18 +249,35 @@ func (d *murmur3cDigest) Sum(in []byte) []byte {
 		fallthrough
 	case 1:
 		k1 ^= uint32(tail[0])
-		k1 *= c1; k1 = bits.RotateLeft32(k1, 15); k1 *= c2; h1 ^= k1
+		k1 *= c1
+		k1 = bits.RotateLeft32(k1, 15)
+		k1 *= c2
+		h1 ^= k1
 	}
 
-	h1 ^= d.len; h2 ^= d.len; h3 ^= d.len; h4 ^= d.len
+	h1 ^= d.len
+	h2 ^= d.len
+	h3 ^= d.len
+	h4 ^= d.len
 
-	h1 += h2; h1 += h3; h1 += h4
-	h2 += h1; h3 += h1; h4 += h1
+	h1 += h2
+	h1 += h3
+	h1 += h4
+	h2 += h1
+	h3 += h1
+	h4 += h1
 
-	h1 = fmix32(h1); h2 = fmix32(h2); h3 = fmix32(h3); h4 = fmix32(h4)
+	h1 = fmix32(h1)
+	h2 = fmix32(h2)
+	h3 = fmix32(h3)
+	h4 = fmix32(h4)
 
-	h1 += h2; h1 += h3; h1 += h4
-	h2 += h1; h3 += h1; h4 += h1
+	h1 += h2
+	h1 += h3
+	h1 += h4
+	h2 += h1
+	h3 += h1
+	h4 += h1
 
 	var buf [16]byte
 	binary.BigEndian.PutUint32(buf[0:], h1)
@@ -293,11 +339,21 @@ func (d *murmur3fDigest) processBlock3f(b []byte) {
 	k1 := binary.LittleEndian.Uint64(b[0:])
 	k2 := binary.LittleEndian.Uint64(b[8:])
 
-	k1 *= murmur3fc1; k1 = bits.RotateLeft64(k1, 31); k1 *= murmur3fc2; d.h1 ^= k1
-	d.h1 = bits.RotateLeft64(d.h1, 27); d.h1 += d.h2; d.h1 = d.h1*5 + 0x52dce729
+	k1 *= murmur3fc1
+	k1 = bits.RotateLeft64(k1, 31)
+	k1 *= murmur3fc2
+	d.h1 ^= k1
+	d.h1 = bits.RotateLeft64(d.h1, 27)
+	d.h1 += d.h2
+	d.h1 = d.h1*5 + 0x52dce729
 
-	k2 *= murmur3fc2; k2 = bits.RotateLeft64(k2, 33); k2 *= murmur3fc1; d.h2 ^= k2
-	d.h2 = bits.RotateLeft64(d.h2, 31); d.h2 += d.h1; d.h2 = d.h2*5 + 0x38495ab5
+	k2 *= murmur3fc2
+	k2 = bits.RotateLeft64(k2, 33)
+	k2 *= murmur3fc1
+	d.h2 ^= k2
+	d.h2 = bits.RotateLeft64(d.h2, 31)
+	d.h2 += d.h1
+	d.h2 = d.h2*5 + 0x38495ab5
 }
 
 func (d *murmur3fDigest) Sum(in []byte) []byte {
@@ -326,7 +382,10 @@ func (d *murmur3fDigest) Sum(in []byte) []byte {
 		fallthrough
 	case 9:
 		k2 ^= uint64(tail[8])
-		k2 *= murmur3fc2; k2 = bits.RotateLeft64(k2, 33); k2 *= murmur3fc1; h2 ^= k2
+		k2 *= murmur3fc2
+		k2 = bits.RotateLeft64(k2, 33)
+		k2 *= murmur3fc1
+		h2 ^= k2
 		fallthrough
 	case 8:
 		k1 ^= uint64(tail[7]) << 56
@@ -351,13 +410,20 @@ func (d *murmur3fDigest) Sum(in []byte) []byte {
 		fallthrough
 	case 1:
 		k1 ^= uint64(tail[0])
-		k1 *= murmur3fc1; k1 = bits.RotateLeft64(k1, 31); k1 *= murmur3fc2; h1 ^= k1
+		k1 *= murmur3fc1
+		k1 = bits.RotateLeft64(k1, 31)
+		k1 *= murmur3fc2
+		h1 ^= k1
 	}
 
-	h1 ^= d.len; h2 ^= d.len
-	h1 += h2; h2 += h1
-	h1 = fmix64(h1); h2 = fmix64(h2)
-	h1 += h2; h2 += h1
+	h1 ^= d.len
+	h2 ^= d.len
+	h1 += h2
+	h2 += h1
+	h1 = fmix64(h1)
+	h2 = fmix64(h2)
+	h1 += h2
+	h2 += h1
 
 	var buf [16]byte
 	binary.BigEndian.PutUint64(buf[0:], h1)

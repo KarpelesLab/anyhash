@@ -17,12 +17,12 @@ func init() {
 const tigerBlockSize = 64
 
 type tigerDigest struct {
-	s      [3]uint64  // hash state (a, b, c)
-	buf    [64]byte   // partial block buffer
-	bufLen int        // bytes in buf
-	len    uint64     // total bytes written
-	passes int        // 3 or 4
-	size   int        // output size: 16, 20, or 24
+	s      [3]uint64 // hash state (a, b, c)
+	buf    [64]byte  // partial block buffer
+	bufLen int       // bytes in buf
+	len    uint64    // total bytes written
+	passes int       // 3 or 4
+	size   int       // output size: 16, 20, or 24
 }
 
 func newTiger(size, passes int) *tigerDigest {

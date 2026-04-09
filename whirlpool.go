@@ -25,10 +25,10 @@ func init() {
 }
 
 type whirlpoolDigest struct {
-	state  [8]uint64  // hash state
-	buffer [64]byte   // partial block buffer
-	bufLen int        // bytes buffered
-	bitLen [4]uint64  // 256-bit message length in bits (big-endian words)
+	state  [8]uint64 // hash state
+	buffer [64]byte  // partial block buffer
+	bufLen int       // bytes buffered
+	bitLen [4]uint64 // 256-bit message length in bits (big-endian words)
 }
 
 func newWhirlpool() *whirlpoolDigest {

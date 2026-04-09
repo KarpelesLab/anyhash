@@ -26,9 +26,9 @@ const (
 
 type xxh32Digest struct {
 	v1, v2, v3, v4 uint32
-	buf             [16]byte
-	n               int
-	len             uint32
+	buf            [16]byte
+	n              int
+	len            uint32
 }
 
 func newXXH32() *xxh32Digest {
@@ -140,9 +140,9 @@ const (
 
 type xxh64Digest struct {
 	v1, v2, v3, v4 uint64
-	buf             [32]byte
-	n               int
-	len             uint64
+	buf            [32]byte
+	n              int
+	len            uint64
 }
 
 func newXXH64() *xxh64Digest {
@@ -343,7 +343,7 @@ func xxh3AccumulateStripe(acc *[8]uint64, input []byte, secret []byte) {
 		key := binary.LittleEndian.Uint64(secret[i*8:])
 		mixed := val ^ key
 		acc[i^1] += val
-		acc[i] += uint64(uint32(mixed)) * uint64(mixed >> 32)
+		acc[i] += uint64(uint32(mixed)) * uint64(mixed>>32)
 	}
 }
 
