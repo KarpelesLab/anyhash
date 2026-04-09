@@ -217,7 +217,7 @@ var md5Codec = phpCodec{
 		ints[0] = lo // byte count lo
 		ints[1] = hi // byte count hi
 		for i := 0; i < 4; i++ {
-			ints[2+i] = u32toi32(binary.LittleEndian.Uint32(goState[4+i*4:]))
+			ints[2+i] = u32toi32(binary.BigEndian.Uint32(goState[4+i*4:]))
 		}
 		// ints[6..21] are the 16 "in" block words (zeros for us)
 		buf := make([]byte, 64)
@@ -231,7 +231,7 @@ var md5Codec = phpCodec{
 		goState := make([]byte, 4+16+64+8)
 		copy(goState, "md5\x01")
 		for i := 0; i < 4; i++ {
-			binary.LittleEndian.PutUint32(goState[4+i*4:], i32tou32(ints[2+i]))
+			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[2+i]))
 		}
 		copy(goState[20:], buf)
 		binary.BigEndian.PutUint64(goState[84:], i32pairtou64(ints[0], ints[1]))
@@ -251,7 +251,8 @@ func makeCRC32Codec(phpAlgo string, fn func() hash.Hash) phpCodec {
 
 	return phpCodec{
 		marshal: func(goState []byte) ([]int32, []byte) {
-			state := binary.BigEndian.Uint32(goState[8:])
+			// Go stores complemented CRC; PHP stores raw state
+			state := ^binary.BigEndian.Uint32(goState[8:])
 			return []int32{u32toi32(state)}, nil
 		},
 		unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
@@ -261,7 +262,8 @@ func makeCRC32Codec(phpAlgo string, fn func() hash.Hash) phpCodec {
 			goState := make([]byte, 12)
 			copy(goState, "crc\x01")
 			binary.BigEndian.PutUint32(goState[4:], tableSum)
-			binary.BigEndian.PutUint32(goState[8:], i32tou32(ints[0]))
+			// PHP stores raw state; Go stores complemented
+			binary.BigEndian.PutUint32(goState[8:], ^i32tou32(ints[0]))
 			return goState, nil
 		},
 	}

@@ -35,13 +35,13 @@ func (d *murmur3aDigest) Reset()         { *d = murmur3aDigest{} }
 func (d *murmur3aDigest) Clone() Hash    { c := *d; return &c }
 
 // PHP format: [h1, carry, len] — 3 ints, no buffer.
-// carry = n | (buf[0] << 8) | (buf[1] << 16) | (buf[2] << 24)
+// carry = n | buf[0]<<((4-n)*8) | buf[1]<<((5-n)*8) | buf[2]<<((6-n)*8)
+// Bytes pack toward MSB, count at LSB.
 func (d *murmur3aDigest) PHPAlgo() string { return "murmur3a" }
 func (d *murmur3aDigest) MarshalPHP() ([]int32, []byte) {
-	var carry uint32
-	carry = uint32(d.n)
+	carry := uint32(d.n)
 	for i := 0; i < d.n; i++ {
-		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
+		carry |= uint32(d.buf[i]) << ((4 - d.n + i) * 8)
 	}
 	return []int32{int32(d.h1), int32(carry), int32(d.len)}, nil
 }
@@ -53,7 +53,7 @@ func (d *murmur3aDigest) UnmarshalPHP(state []int32, buf []byte) error {
 	carry := uint32(state[1])
 	d.n = int(carry & 0xFF)
 	for i := 0; i < d.n; i++ {
-		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
+		d.buf[i] = byte(carry >> ((4 - d.n + i) * 8))
 	}
 	d.len = uint32(state[2])
 	return nil
