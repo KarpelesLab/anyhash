@@ -4,6 +4,7 @@ package anyhash
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 )
 
@@ -20,6 +21,33 @@ func newMD4() *md4digest {
 	d := &md4digest{}
 	d.Reset()
 	return d
+}
+
+// PHP format: [h0,h1,h2,h3, countLo, countHi] + buffer(64)
+func (d *md4digest) PHPAlgo() string { return "md4" }
+func (d *md4digest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 6)
+	for i := 0; i < 4; i++ {
+		ints[i] = int32(d.s[i])
+	}
+	lo, hi := u64toi32pair(d.len)
+	ints[4] = lo
+	ints[5] = hi
+	buf := make([]byte, 64)
+	bufLen := int(d.len % md4BlockSize)
+	copy(buf, d.buf[:bufLen])
+	return ints, buf
+}
+func (d *md4digest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 6 {
+		return fmt.Errorf("anyhash: md4 PHP state needs 6 ints, got %d", len(state))
+	}
+	for i := 0; i < 4; i++ {
+		d.s[i] = uint32(state[i])
+	}
+	d.len = i32pairtou64(state[4], state[5])
+	copy(d.buf[:], buf)
+	return nil
 }
 
 func (d *md4digest) Size() int      { return md4Size }

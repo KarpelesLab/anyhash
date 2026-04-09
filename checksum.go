@@ -2,6 +2,7 @@ package anyhash
 
 import (
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"hash/adler32"
 	"hash/crc32"
@@ -9,14 +10,16 @@ import (
 )
 
 func init() {
-	registerHash("adler32", func() Hash { return wrapHash(func() hash.Hash { return adler32.New() }) })
+	registerHash("adler32", func() Hash { return phpWrapHash("adler32", func() hash.Hash { return adler32.New() }, adler32Codec) })
 	registerHash("crc32", func() Hash { return newCRC32MSB() })
-	registerHash("crc32b", func() Hash { return wrapHash(func() hash.Hash { return crc32.New(crc32.IEEETable) }) })
-	registerHash("crc32c", func() Hash { return wrapHash(func() hash.Hash { return crc32.New(crc32.MakeTable(crc32.Castagnoli)) }) })
-	registerHash("fnv132", func() Hash { return wrapHash(func() hash.Hash { return fnv.New32() }) })
-	registerHash("fnv1a32", func() Hash { return wrapHash(func() hash.Hash { return fnv.New32a() }) })
-	registerHash("fnv164", func() Hash { return wrapHash(func() hash.Hash { return fnv.New64() }) })
-	registerHash("fnv1a64", func() Hash { return wrapHash(func() hash.Hash { return fnv.New64a() }) })
+	crc32bFn := func() hash.Hash { return crc32.New(crc32.IEEETable) }
+	crc32cFn := func() hash.Hash { return crc32.New(crc32.MakeTable(crc32.Castagnoli)) }
+	registerHash("crc32b", func() Hash { return phpWrapHash("crc32b", crc32bFn, makeCRC32Codec("crc32b", crc32bFn)) })
+	registerHash("crc32c", func() Hash { return phpWrapHash("crc32c", crc32cFn, makeCRC32Codec("crc32c", crc32cFn)) })
+	registerHash("fnv132", func() Hash { return phpWrapHash("fnv132", func() hash.Hash { return fnv.New32() }, makeFNV32Codec("fnv\x01")) })
+	registerHash("fnv1a32", func() Hash { return phpWrapHash("fnv1a32", func() hash.Hash { return fnv.New32a() }, makeFNV32Codec("fnv\x02")) })
+	registerHash("fnv164", func() Hash { return phpWrapHash("fnv164", func() hash.Hash { return fnv.New64() }, makeFNV64Codec("fnv\x03")) })
+	registerHash("fnv1a64", func() Hash { return phpWrapHash("fnv1a64", func() hash.Hash { return fnv.New64a() }, makeFNV64Codec("fnv\x04")) })
 }
 
 // crc32MSB implements CRC-32 with MSB-first (unreflected) polynomial 0x04C11DB7.
@@ -60,6 +63,16 @@ func (c *crc32MSB) Write(p []byte) (int, error) {
 	}
 	c.state = s
 	return len(p), nil
+}
+
+func (c *crc32MSB) PHPAlgo() string              { return "crc32" }
+func (c *crc32MSB) MarshalPHP() ([]int32, []byte) { return []int32{int32(c.state)}, nil }
+func (c *crc32MSB) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 1 {
+		return fmt.Errorf("anyhash: crc32 PHP state needs 1 int")
+	}
+	c.state = uint32(state[0])
+	return nil
 }
 
 func (c *crc32MSB) Sum(in []byte) []byte {

@@ -28,14 +28,14 @@ type newFunc func() Hash
 var algos = map[string]newFunc{
 	"md2":        func() Hash { return newMD2() },
 	"md4":        func() Hash { return newMD4() },
-	"md5":        func() Hash { return wrapHash(md5.New) },
-	"sha1":       func() Hash { return wrapHash(sha1.New) },
-	"sha224":     func() Hash { return wrapHash(sha256.New224) },
-	"sha256":     func() Hash { return wrapHash(sha256.New) },
-	"sha384":     func() Hash { return wrapHash(sha512.New384) },
-	"sha512":     func() Hash { return wrapHash(sha512.New) },
-	"sha512/224": func() Hash { return wrapHash(sha512.New512_224) },
-	"sha512/256": func() Hash { return wrapHash(sha512.New512_256) },
+	"md5":        func() Hash { return phpWrapHash("md5", md5.New, md5Codec) },
+	"sha1":       func() Hash { return phpWrapHash("sha1", sha1.New, sha1Codec) },
+	"sha224":     func() Hash { return phpWrapHash("sha224", sha256.New224, sha224Codec) },
+	"sha256":     func() Hash { return phpWrapHash("sha256", sha256.New, sha256Codec) },
+	"sha384":     func() Hash { return phpWrapHash("sha384", sha512.New384, makeSHA512Codec("sha\x04")) },
+	"sha512":     func() Hash { return phpWrapHash("sha512", sha512.New, makeSHA512Codec("sha\x07")) },
+	"sha512/224": func() Hash { return phpWrapHash("sha512/224", sha512.New512_224, makeSHA512Codec("sha\x05")) },
+	"sha512/256": func() Hash { return phpWrapHash("sha512/256", sha512.New512_256, makeSHA512Codec("sha\x06")) },
 }
 
 // registerHash adds an algorithm to the registry. Used by init() functions
@@ -78,6 +78,46 @@ func NewHMAC(algo string, key []byte) (Hash, error) {
 		return nil, fmt.Errorf("anyhash: unknown algorithm %q", algo)
 	}
 	return newHMAC(fn, key), nil
+}
+
+// PHPMarshaler is implemented by hashes that support PHP-compatible state
+// serialization. The state is represented as signed int32 values (matching
+// PHP's integer representation) plus a raw buffer.
+type PHPMarshaler interface {
+	// PHPAlgo returns the PHP-compatible algorithm name (e.g. "sha256", "tiger192,3").
+	PHPAlgo() string
+	// MarshalPHP returns the hash state as PHP-compatible int32 values and a buffer.
+	MarshalPHP() ([]int32, []byte)
+	// UnmarshalPHP restores the hash state from PHP-compatible int32 values and a buffer.
+	UnmarshalPHP(state []int32, buf []byte) error
+}
+
+// MarshalPHP serializes a Hash's internal state into PHP-compatible components.
+// Returns the PHP algorithm name, state as int32 values, and the buffer.
+func MarshalPHP(h Hash) (algo string, state []int32, buf []byte, err error) {
+	pm, ok := h.(PHPMarshaler)
+	if !ok {
+		return "", nil, nil, fmt.Errorf("anyhash: hash does not support PHP marshaling")
+	}
+	state, buf = pm.MarshalPHP()
+	return pm.PHPAlgo(), state, buf, nil
+}
+
+// UnmarshalPHP creates a Hash from PHP-compatible serialized state.
+// The algo name should be a PHP-compatible name (e.g. "sha256", "tiger192,3").
+func UnmarshalPHP(algo string, state []int32, buf []byte) (Hash, error) {
+	h, err := New(algo)
+	if err != nil {
+		return nil, err
+	}
+	pm, ok := h.(PHPMarshaler)
+	if !ok {
+		return nil, fmt.Errorf("anyhash: algorithm %q does not support PHP marshaling", algo)
+	}
+	if err := pm.UnmarshalPHP(state, buf); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 // hashWrapper adapts a standard hash.Hash (that supports binary marshaling)

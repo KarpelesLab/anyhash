@@ -2,7 +2,10 @@ package anyhash
 
 // Jenkins one-at-a-time hash.
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 func init() {
 	registerHash("joaat", func() Hash { return new(joaatDigest) })
@@ -11,6 +14,16 @@ func init() {
 type joaatDigest struct {
 	h   uint32
 	len uint64
+}
+
+func (d *joaatDigest) PHPAlgo() string              { return "joaat" }
+func (d *joaatDigest) MarshalPHP() ([]int32, []byte) { return []int32{int32(d.h)}, nil }
+func (d *joaatDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 1 {
+		return fmt.Errorf("anyhash: joaat PHP state needs 1 int")
+	}
+	d.h = uint32(state[0])
+	return nil
 }
 
 func (d *joaatDigest) Size() int      { return 4 }
