@@ -19,19 +19,25 @@ func init() {
 // --- murmur3a: 32-bit x86 ---
 
 type murmur3aDigest struct {
-	h1  uint32
-	buf [4]byte
-	n   int    // bytes in buf
-	len uint32 // total bytes
+	h1   uint32
+	seed uint32
+	buf  [4]byte
+	n    int    // bytes in buf
+	len  uint32 // total bytes
 }
 
 func newMurmur3a() *murmur3aDigest {
 	return &murmur3aDigest{}
 }
 
+func (d *murmur3aDigest) SetSeed(seed uint64) {
+	d.seed = uint32(seed)
+	d.h1 = d.seed
+}
+
 func (d *murmur3aDigest) Size() int      { return 4 }
 func (d *murmur3aDigest) BlockSize() int { return 4 }
-func (d *murmur3aDigest) Reset()         { *d = murmur3aDigest{} }
+func (d *murmur3aDigest) Reset()         { s := d.seed; *d = murmur3aDigest{seed: s, h1: s} }
 func (d *murmur3aDigest) Clone() Hash    { c := *d; return &c }
 
 // PHP format: [h1, carry, len] — 3 ints, no buffer.
@@ -131,6 +137,7 @@ func fmix32(h uint32) uint32 {
 
 type murmur3cDigest struct {
 	h1, h2, h3, h4 uint32
+	seed           uint32
 	buf            [16]byte
 	n              int
 	len            uint32
@@ -140,9 +147,20 @@ func newMurmur3c() *murmur3cDigest {
 	return &murmur3cDigest{}
 }
 
+func (d *murmur3cDigest) SetSeed(seed uint64) {
+	d.seed = uint32(seed)
+	d.h1 = d.seed
+	d.h2 = d.seed
+	d.h3 = d.seed
+	d.h4 = d.seed
+}
+
 func (d *murmur3cDigest) Size() int      { return 16 }
 func (d *murmur3cDigest) BlockSize() int { return 16 }
-func (d *murmur3cDigest) Reset()         { *d = murmur3cDigest{} }
+func (d *murmur3cDigest) Reset() {
+	s := d.seed
+	*d = murmur3cDigest{seed: s, h1: s, h2: s, h3: s, h4: s}
+}
 func (d *murmur3cDigest) Clone() Hash    { c := *d; return &c }
 
 // PHP format: [h1, h2, h3, h4, carry, ?, ?, carryLen, totalLen] — 9 ints, no buffer.
@@ -347,6 +365,7 @@ func (d *murmur3cDigest) Sum(in []byte) []byte {
 
 type murmur3fDigest struct {
 	h1, h2 uint64
+	seed   uint64
 	buf    [16]byte
 	n      int
 	len    uint64
@@ -356,9 +375,18 @@ func newMurmur3f() *murmur3fDigest {
 	return &murmur3fDigest{}
 }
 
+func (d *murmur3fDigest) SetSeed(seed uint64) {
+	d.seed = seed
+	d.h1 = seed
+	d.h2 = seed
+}
+
 func (d *murmur3fDigest) Size() int      { return 16 }
 func (d *murmur3fDigest) BlockSize() int { return 16 }
-func (d *murmur3fDigest) Reset()         { *d = murmur3fDigest{} }
+func (d *murmur3fDigest) Reset() {
+	s := d.seed
+	*d = murmur3fDigest{seed: s, h1: s, h2: s}
+}
 func (d *murmur3fDigest) Clone() Hash    { c := *d; return &c }
 
 // PHP format: [h1_lo, h1_hi, h2_lo, h2_hi, ?, carry, carryLen, ?, totalLen] — 9 ints, no buffer.

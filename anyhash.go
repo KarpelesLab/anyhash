@@ -59,15 +59,49 @@ func List() []string {
 	return out
 }
 
+// Options configures optional parameters for hash creation.
+// Currently used for seeded hashes (murmur3, xxh32, xxh64) and
+// secret-keyed hashes (xxh3, xxh128).
+type Options struct {
+	Seed   uint64 // seed value (murmur3, xxh32, xxh64, xxh3, xxh128)
+	Secret []byte // custom secret (xxh3, xxh128 only, must be >= 136 bytes)
+}
+
+// Seeder is implemented by hashes that support seeding.
+type Seeder interface {
+	SetSeed(seed uint64)
+}
+
+// Secreter is implemented by hashes that support custom secrets.
+type Secreter interface {
+	SetSecret(secret []byte) error
+}
+
 // New creates a new Hash for the named algorithm. Algorithm names are
 // case-insensitive and hyphens are ignored, so "SHA-256", "sha256", and
 // "SHA256" all work.
-func New(algo string) (Hash, error) {
+func New(algo string, opts ...Options) (Hash, error) {
 	fn, ok := algos[normalize(algo)]
 	if !ok {
 		return nil, fmt.Errorf("anyhash: unknown algorithm %q", algo)
 	}
-	return fn(), nil
+	h := fn()
+	if len(opts) > 0 {
+		opt := opts[0]
+		if opt.Seed != 0 {
+			if s, ok := h.(Seeder); ok {
+				s.SetSeed(opt.Seed)
+			}
+		}
+		if opt.Secret != nil {
+			if s, ok := h.(Secreter); ok {
+				if err := s.SetSecret(opt.Secret); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	return h, nil
 }
 
 // NewHMAC creates a new HMAC using the named hash algorithm and the given key.

@@ -192,3 +192,34 @@ func TestPHPCrossValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestSeededHashes verifies seeded hash output matches PHP.
+func TestSeededHashes(t *testing.T) {
+	tests := []struct {
+		algo string
+		seed uint64
+		want string
+	}{
+		{"murmur3a", 42, "4e4f1e68"},
+		{"murmur3c", 42, "5bcf0fbe8741bbe98741bbe98741bbe9"},
+		{"murmur3f", 42, "0d85089fb3cff7d67510712b42353d30"},
+		{"xxh32", 42, "0147abfe"},
+		{"xxh64", 42, "13c1d910702770e6"},
+		{"xxh3", 12345, "717e64eafd9a85d0"},
+		{"xxh128", 12345, "80ece7f827e09e79717e64eafd9a85d0"},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%s/seed=%d", tc.algo, tc.seed), func(t *testing.T) {
+			h, err := New(tc.algo, Options{Seed: tc.seed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.Write([]byte("abc"))
+			got := hex.EncodeToString(h.Sum(nil))
+			if got != tc.want {
+				t.Errorf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}

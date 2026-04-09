@@ -27,6 +27,7 @@ const (
 
 type xxh32Digest struct {
 	v1, v2, v3, v4 uint32
+	seed           uint32
 	buf            [16]byte
 	n              int
 	len            uint32
@@ -38,17 +39,21 @@ func newXXH32() *xxh32Digest {
 	return d
 }
 
+func (d *xxh32Digest) SetSeed(seed uint64) {
+	d.seed = uint32(seed)
+	d.Reset()
+}
+
 func (d *xxh32Digest) Size() int      { return 4 }
 func (d *xxh32Digest) BlockSize() int { return 16 }
 func (d *xxh32Digest) Clone() Hash    { c := *d; return &c }
 
 func (d *xxh32Digest) Reset() {
-	// seed=0: v1 = seed+p1+p2, v2 = seed+p2, v3 = seed, v4 = seed-p1
-	var seed uint32
-	d.v1 = seed + xxh32p1 + xxh32p2
-	d.v2 = seed + xxh32p2
-	d.v3 = seed
-	d.v4 = seed - xxh32p1
+	s := d.seed
+	d.v1 = s + xxh32p1 + xxh32p2
+	d.v2 = s + xxh32p2
+	d.v3 = s
+	d.v4 = s - xxh32p1
 	d.n = 0
 	d.len = 0
 }
@@ -134,7 +139,7 @@ func (d *xxh32Digest) Sum(in []byte) []byte {
 			bits.RotateLeft32(d.v3, 12) +
 			bits.RotateLeft32(d.v4, 18)
 	} else {
-		h = xxh32p5
+		h = d.seed + xxh32p5
 	}
 	h += d.len
 
@@ -172,6 +177,7 @@ const (
 
 type xxh64Digest struct {
 	v1, v2, v3, v4 uint64
+	seed           uint64
 	buf            [32]byte
 	n              int
 	len            uint64
@@ -183,16 +189,21 @@ func newXXH64() *xxh64Digest {
 	return d
 }
 
+func (d *xxh64Digest) SetSeed(seed uint64) {
+	d.seed = seed
+	d.Reset()
+}
+
 func (d *xxh64Digest) Size() int      { return 8 }
 func (d *xxh64Digest) BlockSize() int { return 32 }
 func (d *xxh64Digest) Clone() Hash    { c := *d; return &c }
 
 func (d *xxh64Digest) Reset() {
-	var seed uint64
-	d.v1 = seed + xxh64p1 + xxh64p2
-	d.v2 = seed + xxh64p2
-	d.v3 = seed
-	d.v4 = seed - xxh64p1
+	s := d.seed
+	d.v1 = s + xxh64p1 + xxh64p2
+	d.v2 = s + xxh64p2
+	d.v3 = s
+	d.v4 = s - xxh64p1
 	d.n = 0
 	d.len = 0
 }
@@ -290,7 +301,7 @@ func (d *xxh64Digest) Sum(in []byte) []byte {
 		h = xxh64MergeRound(h, d.v3)
 		h = xxh64MergeRound(h, d.v4)
 	} else {
-		h = xxh64p5
+		h = d.seed + xxh64p5
 	}
 	h += d.len
 
@@ -345,7 +356,9 @@ type xxh3Digest struct {
 	buf     [256]byte // stripe buffer (up to 256 bytes before consuming)
 	n       int       // bytes in buf
 	len     uint64
-	outSize int // 8 for xxh3, 16 for xxh128
+	seed    uint64
+	secret  []byte // custom secret (nil = use default)
+	outSize int    // 8 for xxh3, 16 for xxh128
 }
 
 func newXXH3(outSize int) *xxh3Digest {
@@ -354,9 +367,40 @@ func newXXH3(outSize int) *xxh3Digest {
 	return d
 }
 
+func (d *xxh3Digest) SetSeed(seed uint64) {
+	d.seed = seed
+	d.secret = nil // seed and secret are mutually exclusive
+	d.Reset()
+}
+
+func (d *xxh3Digest) SetSecret(secret []byte) error {
+	if len(secret) < 136 {
+		return fmt.Errorf("anyhash: xxh3 secret must be at least 136 bytes, got %d", len(secret))
+	}
+	d.secret = make([]byte, len(secret))
+	copy(d.secret, secret)
+	d.seed = 0 // seed and secret are mutually exclusive
+	d.Reset()
+	return nil
+}
+
+func (d *xxh3Digest) getSecret() []byte {
+	if d.secret != nil {
+		return d.secret
+	}
+	return xxh3Secret[:]
+}
+
 func (d *xxh3Digest) Size() int      { return d.outSize }
 func (d *xxh3Digest) BlockSize() int { return 256 }
-func (d *xxh3Digest) Clone() Hash    { c := *d; return &c }
+func (d *xxh3Digest) Clone() Hash {
+	c := *d
+	if d.secret != nil {
+		c.secret = make([]byte, len(d.secret))
+		copy(c.secret, d.secret)
+	}
+	return &c
+}
 
 func (d *xxh3Digest) Reset() {
 	d.acc = [8]uint64{
@@ -482,16 +526,17 @@ func (d *xxh3Digest) sum128() (uint64, uint64) {
 func (d *xxh3Digest) xxh3Len0to16(input []byte) uint64 {
 	l := len(input)
 	if l > 8 {
-		lo := binary.LittleEndian.Uint64(input[0:]) ^ (binary.LittleEndian.Uint64(xxh3Secret[24:]) ^ binary.LittleEndian.Uint64(xxh3Secret[32:]))
-		hi := binary.LittleEndian.Uint64(input[l-8:]) ^ (binary.LittleEndian.Uint64(xxh3Secret[40:]) ^ binary.LittleEndian.Uint64(xxh3Secret[48:]))
+		lo := binary.LittleEndian.Uint64(input[0:]) ^ ((binary.LittleEndian.Uint64(xxh3Secret[24:]) ^ binary.LittleEndian.Uint64(xxh3Secret[32:])) + d.seed)
+		hi := binary.LittleEndian.Uint64(input[l-8:]) ^ ((binary.LittleEndian.Uint64(xxh3Secret[40:]) ^ binary.LittleEndian.Uint64(xxh3Secret[48:])) - d.seed)
 		acc := uint64(l) + bits.ReverseBytes64(lo) + hi + xxh3Mul128Fold64(lo, hi)
 		return xxh3Avalanche64(acc)
 	}
 	if l >= 4 {
+		seed64 := d.seed ^ (uint64(bits.ReverseBytes32(uint32(d.seed))) << 32)
 		input1 := uint64(binary.LittleEndian.Uint32(input[0:]))
 		input2 := uint64(binary.LittleEndian.Uint32(input[l-4:]))
 		input64 := input2 + (input1 << 32)
-		keyed := input64 ^ (binary.LittleEndian.Uint64(xxh3Secret[8:]) ^ binary.LittleEndian.Uint64(xxh3Secret[16:]))
+		keyed := input64 ^ ((binary.LittleEndian.Uint64(xxh3Secret[8:]) ^ binary.LittleEndian.Uint64(xxh3Secret[16:])) - seed64)
 		return xxh3RRMXMX(keyed, uint64(l))
 	}
 	if l > 0 {
@@ -499,10 +544,10 @@ func (d *xxh3Digest) xxh3Len0to16(input []byte) uint64 {
 		c2 := uint64(input[l>>1])
 		c3 := uint64(input[l-1])
 		combined := (c1 << 16) | (c2 << 24) | c3 | (uint64(l) << 8)
-		keyed := combined ^ uint64(binary.LittleEndian.Uint32(xxh3Secret[0:])^binary.LittleEndian.Uint32(xxh3Secret[4:]))
+		keyed := combined ^ (uint64(binary.LittleEndian.Uint32(xxh3Secret[0:])^binary.LittleEndian.Uint32(xxh3Secret[4:])) + d.seed)
 		return xxh64Avalanche(keyed)
 	}
-	return xxh64Avalanche(0 ^ (binary.LittleEndian.Uint64(xxh3Secret[56:]) ^ binary.LittleEndian.Uint64(xxh3Secret[64:])))
+	return xxh64Avalanche(d.seed ^ (binary.LittleEndian.Uint64(xxh3Secret[56:]) ^ binary.LittleEndian.Uint64(xxh3Secret[64:])))
 }
 
 func xxh3RRMXMX(h, l uint64) uint64 {
@@ -528,17 +573,17 @@ func (d *xxh3Digest) xxh3Len17to128(input []byte) uint64 {
 	if l > 32 {
 		if l > 64 {
 			if l > 96 {
-				acc += xxh3Mix16(input[48:], xxh3Secret[96:], 0)
-				acc += xxh3Mix16(input[l-64:], xxh3Secret[112:], 0)
+				acc += xxh3Mix16(input[48:], xxh3Secret[96:], d.seed)
+				acc += xxh3Mix16(input[l-64:], xxh3Secret[112:], d.seed)
 			}
-			acc += xxh3Mix16(input[32:], xxh3Secret[64:], 0)
-			acc += xxh3Mix16(input[l-48:], xxh3Secret[80:], 0)
+			acc += xxh3Mix16(input[32:], xxh3Secret[64:], d.seed)
+			acc += xxh3Mix16(input[l-48:], xxh3Secret[80:], d.seed)
 		}
-		acc += xxh3Mix16(input[16:], xxh3Secret[32:], 0)
-		acc += xxh3Mix16(input[l-32:], xxh3Secret[48:], 0)
+		acc += xxh3Mix16(input[16:], xxh3Secret[32:], d.seed)
+		acc += xxh3Mix16(input[l-32:], xxh3Secret[48:], d.seed)
 	}
-	acc += xxh3Mix16(input[0:], xxh3Secret[0:], 0)
-	acc += xxh3Mix16(input[l-16:], xxh3Secret[16:], 0)
+	acc += xxh3Mix16(input[0:], xxh3Secret[0:], d.seed)
+	acc += xxh3Mix16(input[l-16:], xxh3Secret[16:], d.seed)
 	return xxh3Avalanche64(acc)
 }
 
@@ -548,14 +593,14 @@ func (d *xxh3Digest) xxh3Len129to240(input []byte) uint64 {
 
 	nbRounds := l / 16
 	for i := uint64(0); i < 8; i++ {
-		acc += xxh3Mix16(input[i*16:], xxh3Secret[i*16:], 0)
+		acc += xxh3Mix16(input[i*16:], xxh3Secret[i*16:], d.seed)
 	}
 	acc = xxh3Avalanche64(acc)
 
 	for i := uint64(8); i < nbRounds; i++ {
-		acc += xxh3Mix16(input[i*16:], xxh3Secret[(i-8)*16+3:], 0)
+		acc += xxh3Mix16(input[i*16:], xxh3Secret[(i-8)*16+3:], d.seed)
 	}
-	acc += xxh3Mix16(input[l-16:], xxh3Secret[136-17:], 0)
+	acc += xxh3Mix16(input[l-16:], xxh3Secret[136-17:], d.seed)
 	return xxh3Avalanche64(acc)
 }
 
@@ -624,27 +669,25 @@ func xxh3MergeAccs64(acc *[8]uint64, totalLen uint64) uint64 {
 func (d *xxh3Digest) xxh3Len0to16_128(input []byte) (uint64, uint64) {
 	l := len(input)
 	if l > 8 {
-		lo := binary.LittleEndian.Uint64(input[0:]) ^ (binary.LittleEndian.Uint64(xxh3Secret[24:]) ^ binary.LittleEndian.Uint64(xxh3Secret[32:]))
-		hi := binary.LittleEndian.Uint64(input[l-8:]) ^ (binary.LittleEndian.Uint64(xxh3Secret[40:]) ^ binary.LittleEndian.Uint64(xxh3Secret[48:]))
+		lo := binary.LittleEndian.Uint64(input[0:]) ^ ((binary.LittleEndian.Uint64(xxh3Secret[24:]) ^ binary.LittleEndian.Uint64(xxh3Secret[32:])) + d.seed)
+		hi := binary.LittleEndian.Uint64(input[l-8:]) ^ ((binary.LittleEndian.Uint64(xxh3Secret[40:]) ^ binary.LittleEndian.Uint64(xxh3Secret[48:])) - d.seed)
 		mHi, mLo := bits.Mul64(lo, hi)
 		mLo += uint64(l-1) << 54
 		a := binary.LittleEndian.Uint64(input[0:])
-		b := binary.LittleEndian.Uint64(input[l-8:])
 		mHi += a + uint64(l)*xxh64p1
 		mLo ^= bits.ReverseBytes64(mHi)
-		h128Hi, h128Lo := bits.Mul64(mLo, 0x3C44F82549EBB3B1) // XXH3_PRIME128_LO
+		h128Hi, h128Lo := bits.Mul64(mLo, 0x3C44F82549EBB3B1)
 		h128Hi += mHi * 0x3C44F82549EBB3B1
 		h128Lo = xxh3Avalanche64(h128Lo)
 		h128Hi = xxh3Avalanche64(h128Hi)
-		_ = b
 		return h128Lo, h128Hi
 	}
 	if l >= 4 {
+		seed64 := d.seed ^ (uint64(bits.ReverseBytes32(uint32(d.seed))) << 32)
 		input0 := uint64(binary.LittleEndian.Uint32(input[0:]))
 		input1 := uint64(binary.LittleEndian.Uint32(input[l-4:]))
 		input64 := input0 | (input1 << 32)
-		keyed := input64 ^ (binary.LittleEndian.Uint64(xxh3Secret[8:]) ^ binary.LittleEndian.Uint64(xxh3Secret[16:]))
-		// Swap halves
+		keyed := input64 ^ ((binary.LittleEndian.Uint64(xxh3Secret[8:]) ^ binary.LittleEndian.Uint64(xxh3Secret[16:])) - seed64)
 		m128Hi, m128Lo := bits.Mul64(keyed, xxh64p1+uint64(l)<<2)
 		m128Hi += m128Lo << 1
 		m128Lo ^= m128Hi >> 3
@@ -660,12 +703,12 @@ func (d *xxh3Digest) xxh3Len0to16_128(input []byte) (uint64, uint64) {
 		c3 := uint64(input[l-1])
 		combinedL := (c1 << 16) | (c2 << 24) | c3 | (uint64(l) << 8)
 		combinedH := bits.RotateLeft32(bits.ReverseBytes32(uint32(combinedL)), 13)
-		keyedLo := uint64(combinedL) ^ uint64(binary.LittleEndian.Uint32(xxh3Secret[0:])^binary.LittleEndian.Uint32(xxh3Secret[4:]))
-		keyedHi := uint64(combinedH) ^ uint64(binary.LittleEndian.Uint32(xxh3Secret[8:])^binary.LittleEndian.Uint32(xxh3Secret[12:]))
+		keyedLo := uint64(combinedL) ^ (uint64(binary.LittleEndian.Uint32(xxh3Secret[0:])^binary.LittleEndian.Uint32(xxh3Secret[4:])) + d.seed)
+		keyedHi := uint64(combinedH) ^ (uint64(binary.LittleEndian.Uint32(xxh3Secret[8:])^binary.LittleEndian.Uint32(xxh3Secret[12:])) - d.seed)
 		return xxh64Avalanche(keyedLo), xxh64Avalanche(keyedHi)
 	}
-	lo := xxh64Avalanche(0 ^ (binary.LittleEndian.Uint64(xxh3Secret[64:]) ^ binary.LittleEndian.Uint64(xxh3Secret[72:])))
-	hi := xxh64Avalanche(0 ^ (binary.LittleEndian.Uint64(xxh3Secret[80:]) ^ binary.LittleEndian.Uint64(xxh3Secret[88:])))
+	lo := xxh64Avalanche(d.seed ^ (binary.LittleEndian.Uint64(xxh3Secret[64:]) ^ binary.LittleEndian.Uint64(xxh3Secret[72:])))
+	hi := xxh64Avalanche(d.seed ^ (binary.LittleEndian.Uint64(xxh3Secret[80:]) ^ binary.LittleEndian.Uint64(xxh3Secret[88:])))
 	return lo, hi
 }
 
@@ -677,13 +720,13 @@ func (d *xxh3Digest) xxh3Len17to128_128(input []byte) (uint64, uint64) {
 	if l > 32 {
 		if l > 64 {
 			if l > 96 {
-				accLo, accHi = xxh3Mix32(accLo, accHi, input[48:], input[l-64:], xxh3Secret[96:], 0)
+				accLo, accHi = xxh3Mix32(accLo, accHi, input[48:], input[l-64:], xxh3Secret[96:], d.seed)
 			}
-			accLo, accHi = xxh3Mix32(accLo, accHi, input[32:], input[l-48:], xxh3Secret[64:], 0)
+			accLo, accHi = xxh3Mix32(accLo, accHi, input[32:], input[l-48:], xxh3Secret[64:], d.seed)
 		}
-		accLo, accHi = xxh3Mix32(accLo, accHi, input[16:], input[l-32:], xxh3Secret[32:], 0)
+		accLo, accHi = xxh3Mix32(accLo, accHi, input[16:], input[l-32:], xxh3Secret[32:], d.seed)
 	}
-	accLo, accHi = xxh3Mix32(accLo, accHi, input[0:], input[l-16:], xxh3Secret[0:], 0)
+	accLo, accHi = xxh3Mix32(accLo, accHi, input[0:], input[l-16:], xxh3Secret[0:], d.seed)
 
 	h128Lo := accLo + accHi
 	h128Hi := (accLo * xxh64p1) + (accHi * xxh64p4) + (l * xxh64p2)
@@ -707,15 +750,15 @@ func (d *xxh3Digest) xxh3Len129to240_128(input []byte) (uint64, uint64) {
 
 	nbRounds := l / 32
 	for i := uint64(0); i < 4; i++ {
-		accLo, accHi = xxh3Mix32(accLo, accHi, input[i*32:], input[i*32+16:], xxh3Secret[i*32:], 0)
+		accLo, accHi = xxh3Mix32(accLo, accHi, input[i*32:], input[i*32+16:], xxh3Secret[i*32:], d.seed)
 	}
 	accLo = xxh3Avalanche64(accLo)
 	accHi = xxh3Avalanche64(accHi)
 
 	for i := uint64(4); i < nbRounds; i++ {
-		accLo, accHi = xxh3Mix32(accLo, accHi, input[i*32:], input[i*32+16:], xxh3Secret[(i-4)*32+3:], 0)
+		accLo, accHi = xxh3Mix32(accLo, accHi, input[i*32:], input[i*32+16:], xxh3Secret[(i-4)*32+3:], d.seed)
 	}
-	accLo, accHi = xxh3Mix32(accLo, accHi, input[l-16:], input[l-32:], xxh3Secret[136-17:], 0)
+	accLo, accHi = xxh3Mix32(accLo, accHi, input[l-16:], input[l-32:], xxh3Secret[136-17:], d.seed)
 
 	h128Lo := accLo + accHi
 	h128Hi := (accLo * xxh64p1) + (accHi * xxh64p4) + (l * xxh64p2)
