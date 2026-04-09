@@ -613,33 +613,27 @@ func (d *xxh3Digest) xxh3Len17to128_128(input []byte) (uint64, uint64) {
 	if l > 32 {
 		if l > 64 {
 			if l > 96 {
-				lo, hi := xxh3Mix32(input[48:], input[l-64:], xxh3Secret[96:], 0)
-				accLo += lo
-				accHi += hi
+				accLo, accHi = xxh3Mix32(accLo, accHi, input[48:], input[l-64:], xxh3Secret[96:], 0)
 			}
-			lo, hi := xxh3Mix32(input[32:], input[l-48:], xxh3Secret[64:], 0)
-			accLo += lo
-			accHi += hi
+			accLo, accHi = xxh3Mix32(accLo, accHi, input[32:], input[l-48:], xxh3Secret[64:], 0)
 		}
-		lo, hi := xxh3Mix32(input[16:], input[l-32:], xxh3Secret[32:], 0)
-		accLo += lo
-		accHi += hi
+		accLo, accHi = xxh3Mix32(accLo, accHi, input[16:], input[l-32:], xxh3Secret[32:], 0)
 	}
-	lo, hi := xxh3Mix32(input[0:], input[l-16:], xxh3Secret[0:], 0)
-	accLo += lo
-	accHi += hi
+	accLo, accHi = xxh3Mix32(accLo, accHi, input[0:], input[l-16:], xxh3Secret[0:], 0)
 
 	h128Lo := accLo + accHi
 	h128Hi := (accLo * xxh64p1) + (accHi * xxh64p4) + (l * xxh64p2)
 	h128Lo = xxh3Avalanche64(h128Lo)
-	h128Hi = xxh3Avalanche64(0 - h128Hi)
+	h128Hi = 0 - xxh3Avalanche64(h128Hi)
 	return h128Lo, h128Hi
 }
 
-func xxh3Mix32(input1, input2 []byte, secret []byte, seed uint64) (uint64, uint64) {
-	lo := xxh3Mix16(input1, secret[0:], seed)
-	hi := xxh3Mix16(input2, secret[16:], seed)
-	return lo, hi
+func xxh3Mix32(accLo, accHi uint64, input1, input2 []byte, secret []byte, seed uint64) (uint64, uint64) {
+	accLo += xxh3Mix16(input1, secret[0:], seed)
+	accLo ^= binary.LittleEndian.Uint64(input2[0:]) + binary.LittleEndian.Uint64(input2[8:])
+	accHi += xxh3Mix16(input2, secret[16:], seed)
+	accHi ^= binary.LittleEndian.Uint64(input1[0:]) + binary.LittleEndian.Uint64(input1[8:])
+	return accLo, accHi
 }
 
 func (d *xxh3Digest) xxh3Len129to240_128(input []byte) (uint64, uint64) {
@@ -649,26 +643,20 @@ func (d *xxh3Digest) xxh3Len129to240_128(input []byte) (uint64, uint64) {
 
 	nbRounds := l / 32
 	for i := uint64(0); i < 4; i++ {
-		lo, hi := xxh3Mix32(input[i*32:], input[i*32+16:], xxh3Secret[i*32:], 0)
-		accLo += lo
-		accHi += hi
+		accLo, accHi = xxh3Mix32(accLo, accHi, input[i*32:], input[i*32+16:], xxh3Secret[i*32:], 0)
 	}
 	accLo = xxh3Avalanche64(accLo)
 	accHi = xxh3Avalanche64(accHi)
 
 	for i := uint64(4); i < nbRounds; i++ {
-		lo, hi := xxh3Mix32(input[i*32:], input[i*32+16:], xxh3Secret[(i-4)*32+3:], 0)
-		accLo += lo
-		accHi += hi
+		accLo, accHi = xxh3Mix32(accLo, accHi, input[i*32:], input[i*32+16:], xxh3Secret[(i-4)*32+3:], 0)
 	}
-	lo, hi := xxh3Mix32(input[l-16:], input[l-32:], xxh3Secret[136-17:], 0)
-	accLo += lo
-	accHi += hi
+	accLo, accHi = xxh3Mix32(accLo, accHi, input[l-16:], input[l-32:], xxh3Secret[136-17:], 0)
 
 	h128Lo := accLo + accHi
 	h128Hi := (accLo * xxh64p1) + (accHi * xxh64p4) + (l * xxh64p2)
 	h128Lo = xxh3Avalanche64(h128Lo)
-	h128Hi = xxh3Avalanche64(0 - h128Hi)
+	h128Hi = 0 - xxh3Avalanche64(h128Hi)
 	return h128Lo, h128Hi
 }
 
