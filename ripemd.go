@@ -94,34 +94,34 @@ func (d *ripemdDigest) Clone() Hash {
 	return &c
 }
 
-// PHP format: [h0..h(nstate-1), bitCountLo, bitCountHi] + buffer(64)
+// PHP format: [h0..h(nstate-1), bitCountLo, bitCountHi, buffer(64)]
 func (d *ripemdDigest) PHPAlgo() string { return d.params.phpName }
-func (d *ripemdDigest) MarshalPHP() ([]int32, []byte) {
+func (d *ripemdDigest) MarshalPHP() []any {
 	n := d.params.nstate
-	ints := make([]int32, n+2)
+	state := make([]any, 0, n+3)
 	for i := 0; i < n; i++ {
-		ints[i] = int32(d.s[i])
+		state = append(state, int32(d.s[i]))
 	}
 	bitCount := d.len * 8
 	lo, hi := u64toi32pair(bitCount)
-	ints[n] = lo
-	ints[n+1] = hi
+	state = append(state, lo, hi)
 	buf := make([]byte, 64)
 	bufLen := int(d.len % ripemdBlockSize)
 	copy(buf, d.buf[:bufLen])
-	return ints, buf
+	state = append(state, buf)
+	return state
 }
-func (d *ripemdDigest) UnmarshalPHP(state []int32, buf []byte) error {
+func (d *ripemdDigest) UnmarshalPHP(state []any) error {
 	n := d.params.nstate
-	if len(state) < n+2 {
-		return fmt.Errorf("anyhash: %s PHP state needs %d ints, got %d", d.params.phpName, n+2, len(state))
+	if len(state) < n+3 {
+		return fmt.Errorf("anyhash: %s PHP state needs %d elements, got %d", d.params.phpName, n+3, len(state))
 	}
 	for i := 0; i < n; i++ {
-		d.s[i] = uint32(state[i])
+		d.s[i] = uint32(phpInt(state, i))
 	}
-	bitCount := i32pairtou64(state[n], state[n+1])
+	bitCount := i32pairtou64(phpInt(state, n), phpInt(state, n+1))
 	d.len = bitCount / 8
-	copy(d.buf[:], buf)
+	copy(d.buf[:], phpBuf(state, n+2))
 	return nil
 }
 

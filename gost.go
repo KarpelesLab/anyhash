@@ -70,37 +70,37 @@ func (d *gostDigest) Clone() Hash {
 // PHP format: [h_as_8_uint32_LE, sum_as_8_uint32_LE, bitCountLo, bitCountHi, bufLen] + buffer(32)
 // Total: 19 ints + 32-byte buffer.
 func (d *gostDigest) PHPAlgo() string { return d.phpAlgo }
-func (d *gostDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 19)
+func (d *gostDigest) MarshalPHP() []any {
+	state := make([]any, 0, 20)
 	for i := 0; i < 8; i++ {
-		ints[i] = int32(binary.LittleEndian.Uint32(d.h[i*4:]))
+		state = append(state, int32(binary.LittleEndian.Uint32(d.h[i*4:])))
 	}
 	for i := 0; i < 8; i++ {
-		ints[8+i] = int32(binary.LittleEndian.Uint32(d.sum[i*4:]))
+		state = append(state, int32(binary.LittleEndian.Uint32(d.sum[i*4:])))
 	}
 	bitCount := d.length * 8
 	lo, hi := u64toi32pair(bitCount)
-	ints[16] = lo
-	ints[17] = hi
-	ints[18] = int32(d.bufLen)
+	state = append(state, lo, hi)
+	state = append(state, int32(d.bufLen))
 	buf := make([]byte, 32)
 	copy(buf, d.buf[:d.bufLen])
-	return ints, buf
+	state = append(state, buf)
+	return state
 }
-func (d *gostDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 19 {
-		return fmt.Errorf("anyhash: gost PHP state needs 19 ints, got %d", len(state))
+func (d *gostDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 20 {
+		return fmt.Errorf("anyhash: gost PHP state needs 20 elements, got %d", len(state))
 	}
 	for i := 0; i < 8; i++ {
-		binary.LittleEndian.PutUint32(d.h[i*4:], uint32(state[i]))
+		binary.LittleEndian.PutUint32(d.h[i*4:], uint32(phpInt(state, i)))
 	}
 	for i := 0; i < 8; i++ {
-		binary.LittleEndian.PutUint32(d.sum[i*4:], uint32(state[8+i]))
+		binary.LittleEndian.PutUint32(d.sum[i*4:], uint32(phpInt(state, 8+i)))
 	}
-	bitCount := i32pairtou64(state[16], state[17])
+	bitCount := i32pairtou64(phpInt(state, 16), phpInt(state, 17))
 	d.length = bitCount / 8
-	d.bufLen = int(state[18])
-	copy(d.buf[:], buf)
+	d.bufLen = int(phpInt(state, 18))
+	copy(d.buf[:], phpBuf(state, 19))
 	return nil
 }
 

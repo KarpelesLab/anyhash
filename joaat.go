@@ -16,13 +16,13 @@ type joaatDigest struct {
 	len uint64
 }
 
-func (d *joaatDigest) PHPAlgo() string              { return "joaat" }
-func (d *joaatDigest) MarshalPHP() ([]int32, []byte) { return []int32{int32(d.h)}, nil }
-func (d *joaatDigest) UnmarshalPHP(state []int32, buf []byte) error {
+func (d *joaatDigest) PHPAlgo() string    { return "joaat" }
+func (d *joaatDigest) MarshalPHP() []any  { return []any{int32(d.h)} }
+func (d *joaatDigest) UnmarshalPHP(state []any) error {
 	if len(state) < 1 {
-		return fmt.Errorf("anyhash: joaat PHP state needs 1 int")
+		return fmt.Errorf("anyhash: joaat PHP state needs 1 element")
 	}
-	d.h = uint32(state[0])
+	d.h = uint32(phpInt(state, 0))
 	return nil
 }
 

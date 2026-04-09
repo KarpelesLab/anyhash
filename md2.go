@@ -54,25 +54,35 @@ func (d *md2digest) Clone() Hash {
 // PHP format: MD2 is special - state is stored as byte strings, not int32 values.
 // ints=[bufLen], buf=state(48)+checksum(16)+buf(16)=80 bytes
 func (d *md2digest) PHPAlgo() string { return "md2" }
-func (d *md2digest) MarshalPHP() ([]int32, []byte) {
-	ints := []int32{int32(d.bufLen)}
-	buf := make([]byte, 80)
-	copy(buf[0:48], d.state[:])
-	copy(buf[48:64], d.checksum[:])
-	copy(buf[64:80], d.buf[:])
-	return ints, buf
+func (d *md2digest) MarshalPHP() []any {
+	stateBytes := make([]byte, 48)
+	copy(stateBytes, d.state[:])
+	checksumBytes := make([]byte, 16)
+	copy(checksumBytes, d.checksum[:])
+	bufBytes := make([]byte, 16)
+	copy(bufBytes, d.buf[:])
+	return []any{stateBytes, checksumBytes, bufBytes, int32(d.bufLen)}
 }
-func (d *md2digest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 1 {
-		return fmt.Errorf("anyhash: md2 PHP state needs 1 int, got %d", len(state))
+func (d *md2digest) UnmarshalPHP(state []any) error {
+	if len(state) < 4 {
+		return fmt.Errorf("anyhash: md2 PHP state needs 4 elements, got %d", len(state))
 	}
-	if len(buf) < 80 {
-		return fmt.Errorf("anyhash: md2 PHP buffer needs 80 bytes, got %d", len(buf))
+	sb := phpBuf(state, 0)
+	if len(sb) < 48 {
+		return fmt.Errorf("anyhash: md2 PHP state[0] needs 48 bytes, got %d", len(sb))
 	}
-	d.bufLen = int(state[0])
-	copy(d.state[:], buf[0:48])
-	copy(d.checksum[:], buf[48:64])
-	copy(d.buf[:], buf[64:80])
+	copy(d.state[:], sb[:48])
+	cb := phpBuf(state, 1)
+	if len(cb) < 16 {
+		return fmt.Errorf("anyhash: md2 PHP state[1] needs 16 bytes, got %d", len(cb))
+	}
+	copy(d.checksum[:], cb[:16])
+	bb := phpBuf(state, 2)
+	if len(bb) < 16 {
+		return fmt.Errorf("anyhash: md2 PHP state[2] needs 16 bytes, got %d", len(bb))
+	}
+	copy(d.buf[:], bb[:16])
+	d.bufLen = int(phpInt(state, 3))
 	return nil
 }
 

@@ -34,7 +34,7 @@ func (w *phpHashWrapper) Clone() Hash {
 
 func (w *phpHashWrapper) PHPAlgo() string { return w.phpAlgo }
 
-func (w *phpHashWrapper) MarshalPHP() ([]int32, []byte) {
+func (w *phpHashWrapper) MarshalPHP() []any {
 	state, err := w.Hash.(encoding.BinaryMarshaler).MarshalBinary()
 	if err != nil {
 		panic("anyhash: php marshal: " + err.Error())
@@ -42,18 +42,36 @@ func (w *phpHashWrapper) MarshalPHP() ([]int32, []byte) {
 	return w.codec.marshal(state)
 }
 
-func (w *phpHashWrapper) UnmarshalPHP(ints []int32, buf []byte) error {
-	state, err := w.codec.unmarshal(ints, buf)
+func (w *phpHashWrapper) UnmarshalPHP(state []any) error {
+	goState, err := w.codec.unmarshal(state)
 	if err != nil {
 		return err
 	}
-	return w.Hash.(encoding.BinaryUnmarshaler).UnmarshalBinary(state)
+	return w.Hash.(encoding.BinaryUnmarshaler).UnmarshalBinary(goState)
 }
 
-// phpCodec defines how to convert between Go's binary marshal format and PHP's int32+buffer format.
+// phpCodec defines how to convert between Go's binary marshal format and PHP's []any format.
 type phpCodec struct {
-	marshal   func(goState []byte) ([]int32, []byte)
-	unmarshal func(ints []int32, buf []byte) (goState []byte, err error)
+	marshal   func(goState []byte) []any
+	unmarshal func(state []any) (goState []byte, err error)
+}
+
+// phpInt extracts an int32 from a PHP state slice at position i.
+func phpInt(state []any, i int) int32 {
+	if i >= len(state) {
+		return 0
+	}
+	v, _ := state[i].(int32)
+	return v
+}
+
+// phpBuf extracts a []byte from a PHP state slice at position i.
+func phpBuf(state []any, i int) []byte {
+	if i >= len(state) {
+		return nil
+	}
+	v, _ := state[i].([]byte)
+	return v
 }
 
 // Helper: reinterpret uint32 as int32 (preserving bits).
@@ -77,53 +95,52 @@ func i32pairtou64(lo, hi int32) uint64 {
 // PHP format: [h0..h7 as int32, countLo, countHi] + buffer(64)
 
 var sha256Codec = phpCodec{
-	marshal: func(goState []byte) ([]int32, []byte) {
+	marshal: func(goState []byte) []any {
+		state := make([]any, 0, 11)
 		// Skip 4-byte magic, read 8 x uint32 state
-		ints := make([]int32, 10)
 		for i := 0; i < 8; i++ {
-			ints[i] = u32toi32(binary.BigEndian.Uint32(goState[4+i*4:]))
+			state = append(state, u32toi32(binary.BigEndian.Uint32(goState[4+i*4:])))
 		}
-		// Buffer is at offset 36, up to 64 bytes, then len at end
 		// PHP stores bit count, Go stores byte count
 		bitCount := binary.BigEndian.Uint64(goState[len(goState)-8:]) * 8
 		lo, hi := u64toi32pair(bitCount)
-		ints[8] = lo
-		ints[9] = hi
+		state = append(state, lo, hi)
 		buf := make([]byte, 64)
 		copy(buf, goState[36:])
-		return ints, buf
+		state = append(state, buf)
+		return state
 	},
-	unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-		if len(ints) < 10 {
-			return nil, fmt.Errorf("anyhash: sha256 PHP state needs 10 ints, got %d", len(ints))
+	unmarshal: func(state []any) ([]byte, error) {
+		if len(state) < 11 {
+			return nil, fmt.Errorf("anyhash: sha256 PHP state needs 11 elements, got %d", len(state))
 		}
 		magic := []byte("sha\x03") // sha256 magic
 		goState := make([]byte, 4+32+64+8)
 		copy(goState, magic)
 		for i := 0; i < 8; i++ {
-			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[i]))
+			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(phpInt(state, i)))
 		}
-		copy(goState[36:], buf)
+		copy(goState[36:], phpBuf(state, 10))
 		// PHP stores bit count, Go stores byte count
-		binary.BigEndian.PutUint64(goState[100:], i32pairtou64(ints[8], ints[9])/8)
+		binary.BigEndian.PutUint64(goState[100:], i32pairtou64(phpInt(state, 8), phpInt(state, 9))/8)
 		return goState, nil
 	},
 }
 
 var sha224Codec = phpCodec{
-	marshal:   sha256Codec.marshal,
-	unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-		if len(ints) < 10 {
-			return nil, fmt.Errorf("anyhash: sha224 PHP state needs 10 ints, got %d", len(ints))
+	marshal: sha256Codec.marshal,
+	unmarshal: func(state []any) ([]byte, error) {
+		if len(state) < 11 {
+			return nil, fmt.Errorf("anyhash: sha224 PHP state needs 11 elements, got %d", len(state))
 		}
 		magic := []byte("sha\x02") // sha224 magic
 		goState := make([]byte, 4+32+64+8)
 		copy(goState, magic)
 		for i := 0; i < 8; i++ {
-			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[i]))
+			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(phpInt(state, i)))
 		}
-		copy(goState[36:], buf)
-		binary.BigEndian.PutUint64(goState[100:], i32pairtou64(ints[8], ints[9])/8)
+		copy(goState[36:], phpBuf(state, 10))
+		binary.BigEndian.PutUint64(goState[100:], i32pairtou64(phpInt(state, 8), phpInt(state, 9))/8)
 		return goState, nil
 	},
 }
@@ -133,31 +150,31 @@ var sha224Codec = phpCodec{
 // PHP format: [h0..h4 as int32, countLo, countHi] + buffer(64)
 
 var sha1Codec = phpCodec{
-	marshal: func(goState []byte) ([]int32, []byte) {
-		ints := make([]int32, 7)
+	marshal: func(goState []byte) []any {
+		state := make([]any, 0, 8)
 		for i := 0; i < 5; i++ {
-			ints[i] = u32toi32(binary.BigEndian.Uint32(goState[4+i*4:]))
+			state = append(state, u32toi32(binary.BigEndian.Uint32(goState[4+i*4:])))
 		}
 		bitCount := binary.BigEndian.Uint64(goState[len(goState)-8:]) * 8
 		lo, hi := u64toi32pair(bitCount)
-		ints[5] = lo
-		ints[6] = hi
+		state = append(state, lo, hi)
 		buf := make([]byte, 64)
 		copy(buf, goState[24:])
-		return ints, buf
+		state = append(state, buf)
+		return state
 	},
-	unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-		if len(ints) < 7 {
-			return nil, fmt.Errorf("anyhash: sha1 PHP state needs 7 ints, got %d", len(ints))
+	unmarshal: func(state []any) ([]byte, error) {
+		if len(state) < 8 {
+			return nil, fmt.Errorf("anyhash: sha1 PHP state needs 8 elements, got %d", len(state))
 		}
 		magic := []byte("sha\x01")
 		goState := make([]byte, 4+20+64+8)
 		copy(goState, magic)
 		for i := 0; i < 5; i++ {
-			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[i]))
+			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(phpInt(state, i)))
 		}
-		copy(goState[24:], buf)
-		binary.BigEndian.PutUint64(goState[88:], i32pairtou64(ints[5], ints[6])/8)
+		copy(goState[24:], phpBuf(state, 7))
+		binary.BigEndian.PutUint64(goState[88:], i32pairtou64(phpInt(state, 5), phpInt(state, 6))/8)
 		return goState, nil
 	},
 }
@@ -169,34 +186,35 @@ var sha1Codec = phpCodec{
 
 func makeSHA512Codec(magic string) phpCodec {
 	return phpCodec{
-		marshal: func(goState []byte) ([]int32, []byte) {
-			ints := make([]int32, 20)
+		marshal: func(goState []byte) []any {
+			state := make([]any, 0, 21)
 			for i := 0; i < 8; i++ {
 				v := binary.BigEndian.Uint64(goState[4+i*8:])
-				ints[i*2] = int32(uint32(v >> 32)) // hi first (PHP order)
-				ints[i*2+1] = int32(uint32(v))     // lo second
+				state = append(state, int32(uint32(v>>32))) // hi first (PHP order)
+				state = append(state, int32(uint32(v)))     // lo second
 			}
 			bitCount := binary.BigEndian.Uint64(goState[len(goState)-8:]) * 8
-			ints[16] = int32(uint32(bitCount))
-			ints[17] = int32(uint32(bitCount >> 32))
-			ints[18] = 0
-			ints[19] = 0
+			state = append(state, int32(uint32(bitCount)))
+			state = append(state, int32(uint32(bitCount>>32)))
+			state = append(state, int32(0))
+			state = append(state, int32(0))
 			buf := make([]byte, 128)
 			copy(buf, goState[68:])
-			return ints, buf
+			state = append(state, buf)
+			return state
 		},
-		unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-			if len(ints) < 20 {
-				return nil, fmt.Errorf("anyhash: sha512 PHP state needs 20 ints, got %d", len(ints))
+		unmarshal: func(state []any) ([]byte, error) {
+			if len(state) < 21 {
+				return nil, fmt.Errorf("anyhash: sha512 PHP state needs 21 elements, got %d", len(state))
 			}
 			goState := make([]byte, 4+64+128+8)
 			copy(goState, magic)
 			for i := 0; i < 8; i++ {
-				v := uint64(uint32(ints[i*2]))<<32 | uint64(uint32(ints[i*2+1]))
+				v := uint64(uint32(phpInt(state, i*2)))<<32 | uint64(uint32(phpInt(state, i*2+1)))
 				binary.BigEndian.PutUint64(goState[4+i*8:], v)
 			}
-			copy(goState[68:], buf)
-			bitCount := uint64(uint32(ints[16])) | uint64(uint32(ints[17]))<<32
+			copy(goState[68:], phpBuf(state, 20))
+			bitCount := uint64(uint32(phpInt(state, 16))) | uint64(uint32(phpInt(state, 17)))<<32
 			binary.BigEndian.PutUint64(goState[196:], bitCount/8)
 			return goState, nil
 		},
@@ -209,32 +227,37 @@ func makeSHA512Codec(magic string) phpCodec {
 // Note: MD5 has 23 elements total — the 16 trailing zeros are PHP's "in" block.
 
 var md5Codec = phpCodec{
-	marshal: func(goState []byte) ([]int32, []byte) {
-		ints := make([]int32, 22)
+	marshal: func(goState []byte) []any {
 		// Go MD5 binary: "md5\x01" + h[0..3] LE + buffer + len BE
+		// PHP format: [countLo, countHi, h0..h3, buffer(64), in0..in15]
 		totalLen := binary.BigEndian.Uint64(goState[len(goState)-8:])
 		lo, hi := u64toi32pair(totalLen)
-		ints[0] = lo // byte count lo
-		ints[1] = hi // byte count hi
+		state := make([]any, 0, 23)
+		state = append(state, lo) // byte count lo
+		state = append(state, hi) // byte count hi
 		for i := 0; i < 4; i++ {
-			ints[2+i] = u32toi32(binary.BigEndian.Uint32(goState[4+i*4:]))
+			state = append(state, u32toi32(binary.BigEndian.Uint32(goState[4+i*4:])))
 		}
-		// ints[6..21] are the 16 "in" block words (zeros for us)
 		buf := make([]byte, 64)
 		copy(buf, goState[20:])
-		return ints, buf
+		state = append(state, buf)
+		// 16 "in" block words (zeros)
+		for i := 0; i < 16; i++ {
+			state = append(state, int32(0))
+		}
+		return state
 	},
-	unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-		if len(ints) < 6 {
-			return nil, fmt.Errorf("anyhash: md5 PHP state needs at least 6 ints, got %d", len(ints))
+	unmarshal: func(state []any) ([]byte, error) {
+		if len(state) < 7 {
+			return nil, fmt.Errorf("anyhash: md5 PHP state needs at least 7 elements, got %d", len(state))
 		}
 		goState := make([]byte, 4+16+64+8)
 		copy(goState, "md5\x01")
 		for i := 0; i < 4; i++ {
-			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(ints[2+i]))
+			binary.BigEndian.PutUint32(goState[4+i*4:], i32tou32(phpInt(state, 2+i)))
 		}
-		copy(goState[20:], buf)
-		binary.BigEndian.PutUint64(goState[84:], i32pairtou64(ints[0], ints[1]))
+		copy(goState[20:], phpBuf(state, 6))
+		binary.BigEndian.PutUint64(goState[84:], i32pairtou64(phpInt(state, 0), phpInt(state, 1)))
 		return goState, nil
 	},
 }
@@ -250,20 +273,20 @@ func makeCRC32Codec(phpAlgo string, fn func() hash.Hash) phpCodec {
 	tableSum := binary.BigEndian.Uint32(initState[4:8])
 
 	return phpCodec{
-		marshal: func(goState []byte) ([]int32, []byte) {
+		marshal: func(goState []byte) []any {
 			// Go stores complemented CRC; PHP stores raw state
-			state := ^binary.BigEndian.Uint32(goState[8:])
-			return []int32{u32toi32(state)}, nil
+			s := ^binary.BigEndian.Uint32(goState[8:])
+			return []any{u32toi32(s)}
 		},
-		unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-			if len(ints) < 1 {
-				return nil, fmt.Errorf("anyhash: crc32 PHP state needs 1 int, got %d", len(ints))
+		unmarshal: func(state []any) ([]byte, error) {
+			if len(state) < 1 {
+				return nil, fmt.Errorf("anyhash: crc32 PHP state needs 1 element, got %d", len(state))
 			}
 			goState := make([]byte, 12)
 			copy(goState, "crc\x01")
 			binary.BigEndian.PutUint32(goState[4:], tableSum)
 			// PHP stores raw state; Go stores complemented
-			binary.BigEndian.PutUint32(goState[8:], ^i32tou32(ints[0]))
+			binary.BigEndian.PutUint32(goState[8:], ^i32tou32(phpInt(state, 0)))
 			return goState, nil
 		},
 	}
@@ -274,17 +297,17 @@ func makeCRC32Codec(phpAlgo string, fn func() hash.Hash) phpCodec {
 // PHP format: [int32(state)]
 
 var adler32Codec = phpCodec{
-	marshal: func(goState []byte) ([]int32, []byte) {
-		state := binary.BigEndian.Uint32(goState[4:])
-		return []int32{u32toi32(state)}, nil
+	marshal: func(goState []byte) []any {
+		s := binary.BigEndian.Uint32(goState[4:])
+		return []any{u32toi32(s)}
 	},
-	unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-		if len(ints) < 1 {
-			return nil, fmt.Errorf("anyhash: adler32 PHP state needs 1 int, got %d", len(ints))
+	unmarshal: func(state []any) ([]byte, error) {
+		if len(state) < 1 {
+			return nil, fmt.Errorf("anyhash: adler32 PHP state needs 1 element, got %d", len(state))
 		}
 		goState := make([]byte, 8)
 		copy(goState, "adl\x01")
-		binary.BigEndian.PutUint32(goState[4:], i32tou32(ints[0]))
+		binary.BigEndian.PutUint32(goState[4:], i32tou32(phpInt(state, 0)))
 		return goState, nil
 	},
 }
@@ -295,17 +318,17 @@ var adler32Codec = phpCodec{
 
 func makeFNV32Codec(magic string) phpCodec {
 	return phpCodec{
-		marshal: func(goState []byte) ([]int32, []byte) {
-			state := binary.BigEndian.Uint32(goState[4:])
-			return []int32{u32toi32(state)}, nil
+		marshal: func(goState []byte) []any {
+			s := binary.BigEndian.Uint32(goState[4:])
+			return []any{u32toi32(s)}
 		},
-		unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-			if len(ints) < 1 {
-				return nil, fmt.Errorf("anyhash: fnv32 PHP state needs 1 int, got %d", len(ints))
+		unmarshal: func(state []any) ([]byte, error) {
+			if len(state) < 1 {
+				return nil, fmt.Errorf("anyhash: fnv32 PHP state needs 1 element, got %d", len(state))
 			}
 			goState := make([]byte, 8)
 			copy(goState, magic)
-			binary.BigEndian.PutUint32(goState[4:], i32tou32(ints[0]))
+			binary.BigEndian.PutUint32(goState[4:], i32tou32(phpInt(state, 0)))
 			return goState, nil
 		},
 	}
@@ -317,18 +340,18 @@ func makeFNV32Codec(magic string) phpCodec {
 
 func makeFNV64Codec(magic string) phpCodec {
 	return phpCodec{
-		marshal: func(goState []byte) ([]int32, []byte) {
-			state := binary.BigEndian.Uint64(goState[4:])
-			lo, hi := u64toi32pair(state)
-			return []int32{lo, hi}, nil
+		marshal: func(goState []byte) []any {
+			s := binary.BigEndian.Uint64(goState[4:])
+			lo, hi := u64toi32pair(s)
+			return []any{lo, hi}
 		},
-		unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-			if len(ints) < 2 {
-				return nil, fmt.Errorf("anyhash: fnv64 PHP state needs 2 ints, got %d", len(ints))
+		unmarshal: func(state []any) ([]byte, error) {
+			if len(state) < 2 {
+				return nil, fmt.Errorf("anyhash: fnv64 PHP state needs 2 elements, got %d", len(state))
 			}
 			goState := make([]byte, 12)
 			copy(goState, magic)
-			binary.BigEndian.PutUint64(goState[4:], i32pairtou64(ints[0], ints[1]))
+			binary.BigEndian.PutUint64(goState[4:], i32pairtou64(phpInt(state, 0), phpInt(state, 1)))
 			return goState, nil
 		},
 	}

@@ -23,30 +23,30 @@ func newMD4() *md4digest {
 	return d
 }
 
-// PHP format: [h0,h1,h2,h3, countLo, countHi] + buffer(64)
+// PHP format: [h0,h1,h2,h3, countLo, countHi, buffer(64)]
 func (d *md4digest) PHPAlgo() string { return "md4" }
-func (d *md4digest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 6)
+func (d *md4digest) MarshalPHP() []any {
+	state := make([]any, 0, 7)
 	for i := 0; i < 4; i++ {
-		ints[i] = int32(d.s[i])
+		state = append(state, int32(d.s[i]))
 	}
 	lo, hi := u64toi32pair(d.len * 8)
-	ints[4] = lo
-	ints[5] = hi
+	state = append(state, lo, hi)
 	buf := make([]byte, 64)
 	bufLen := int(d.len % md4BlockSize)
 	copy(buf, d.buf[:bufLen])
-	return ints, buf
+	state = append(state, buf)
+	return state
 }
-func (d *md4digest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 6 {
-		return fmt.Errorf("anyhash: md4 PHP state needs 6 ints, got %d", len(state))
+func (d *md4digest) UnmarshalPHP(state []any) error {
+	if len(state) < 7 {
+		return fmt.Errorf("anyhash: md4 PHP state needs 7 elements, got %d", len(state))
 	}
 	for i := 0; i < 4; i++ {
-		d.s[i] = uint32(state[i])
+		d.s[i] = uint32(phpInt(state, i))
 	}
-	d.len = i32pairtou64(state[4], state[5]) / 8
-	copy(d.buf[:], buf)
+	d.len = i32pairtou64(phpInt(state, 4), phpInt(state, 5)) / 8
+	copy(d.buf[:], phpBuf(state, 6))
 	return nil
 }
 

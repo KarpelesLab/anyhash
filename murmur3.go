@@ -38,24 +38,24 @@ func (d *murmur3aDigest) Clone() Hash    { c := *d; return &c }
 // carry = n | buf[0]<<((4-n)*8) | buf[1]<<((5-n)*8) | buf[2]<<((6-n)*8)
 // Bytes pack toward MSB, count at LSB.
 func (d *murmur3aDigest) PHPAlgo() string { return "murmur3a" }
-func (d *murmur3aDigest) MarshalPHP() ([]int32, []byte) {
+func (d *murmur3aDigest) MarshalPHP() []any {
 	carry := uint32(d.n)
 	for i := 0; i < d.n; i++ {
 		carry |= uint32(d.buf[i]) << ((4 - d.n + i) * 8)
 	}
-	return []int32{int32(d.h1), int32(carry), int32(d.len)}, nil
+	return []any{int32(d.h1), int32(carry), int32(d.len)}
 }
-func (d *murmur3aDigest) UnmarshalPHP(state []int32, buf []byte) error {
+func (d *murmur3aDigest) UnmarshalPHP(state []any) error {
 	if len(state) < 3 {
-		return fmt.Errorf("anyhash: murmur3a PHP state needs 3 ints, got %d", len(state))
+		return fmt.Errorf("anyhash: murmur3a PHP state needs 3 elements, got %d", len(state))
 	}
-	d.h1 = uint32(state[0])
-	carry := uint32(state[1])
+	d.h1 = uint32(phpInt(state, 0))
+	carry := uint32(phpInt(state, 1))
 	d.n = int(carry & 0xFF)
 	for i := 0; i < d.n; i++ {
 		d.buf[i] = byte(carry >> ((4 - d.n + i) * 8))
 	}
-	d.len = uint32(state[2])
+	d.len = uint32(phpInt(state, 2))
 	return nil
 }
 
@@ -148,37 +148,30 @@ func (d *murmur3cDigest) Clone() Hash    { c := *d; return &c }
 // PHP format: [h1, h2, h3, h4, carry, ?, ?, carryLen, totalLen] — 9 ints, no buffer.
 // carry = buf[0]<<8 | buf[1]<<16 | buf[2]<<24 ... (no count in byte 0)
 func (d *murmur3cDigest) PHPAlgo() string { return "murmur3c" }
-func (d *murmur3cDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 9)
-	ints[0] = int32(d.h1)
-	ints[1] = int32(d.h2)
-	ints[2] = int32(d.h3)
-	ints[3] = int32(d.h4)
+func (d *murmur3cDigest) MarshalPHP() []any {
 	var carry uint32
 	for i := 0; i < d.n; i++ {
 		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
 	}
-	ints[4] = int32(carry)
-	ints[5] = 0
-	ints[6] = 0
-	ints[7] = int32(d.n)
-	ints[8] = int32(d.len)
-	return ints, nil
-}
-func (d *murmur3cDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 9 {
-		return fmt.Errorf("anyhash: murmur3c PHP state needs 9 ints, got %d", len(state))
+	return []any{
+		int32(d.h1), int32(d.h2), int32(d.h3), int32(d.h4),
+		int32(carry), int32(0), int32(0), int32(d.n), int32(d.len),
 	}
-	d.h1 = uint32(state[0])
-	d.h2 = uint32(state[1])
-	d.h3 = uint32(state[2])
-	d.h4 = uint32(state[3])
-	carry := uint32(state[4])
-	d.n = int(state[7])
+}
+func (d *murmur3cDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 9 {
+		return fmt.Errorf("anyhash: murmur3c PHP state needs 9 elements, got %d", len(state))
+	}
+	d.h1 = uint32(phpInt(state, 0))
+	d.h2 = uint32(phpInt(state, 1))
+	d.h3 = uint32(phpInt(state, 2))
+	d.h4 = uint32(phpInt(state, 3))
+	carry := uint32(phpInt(state, 4))
+	d.n = int(phpInt(state, 7))
 	for i := 0; i < d.n; i++ {
 		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
 	}
-	d.len = uint32(state[8])
+	d.len = uint32(phpInt(state, 8))
 	return nil
 }
 
@@ -371,37 +364,30 @@ func (d *murmur3fDigest) Clone() Hash    { c := *d; return &c }
 // PHP format: [h1_lo, h1_hi, h2_lo, h2_hi, ?, carry, carryLen, ?, totalLen] — 9 ints, no buffer.
 // carry = buf[0]<<8 | buf[1]<<16 | buf[2]<<24 ... (same encoding as murmur3c)
 func (d *murmur3fDigest) PHPAlgo() string { return "murmur3f" }
-func (d *murmur3fDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 9)
+func (d *murmur3fDigest) MarshalPHP() []any {
 	lo, hi := u64toi32pair(d.h1)
-	ints[0] = lo
-	ints[1] = hi
-	lo, hi = u64toi32pair(d.h2)
-	ints[2] = lo
-	ints[3] = hi
-	ints[4] = 0
+	lo2, hi2 := u64toi32pair(d.h2)
 	var carry uint32
 	for i := 0; i < d.n; i++ {
 		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
 	}
-	ints[5] = int32(carry)
-	ints[6] = int32(d.n)
-	ints[7] = 0
-	ints[8] = int32(d.len)
-	return ints, nil
-}
-func (d *murmur3fDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 9 {
-		return fmt.Errorf("anyhash: murmur3f PHP state needs 9 ints, got %d", len(state))
+	return []any{
+		lo, hi, lo2, hi2,
+		int32(0), int32(carry), int32(d.n), int32(0), int32(d.len),
 	}
-	d.h1 = i32pairtou64(state[0], state[1])
-	d.h2 = i32pairtou64(state[2], state[3])
-	carry := uint32(state[5])
-	d.n = int(state[6])
+}
+func (d *murmur3fDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 9 {
+		return fmt.Errorf("anyhash: murmur3f PHP state needs 9 elements, got %d", len(state))
+	}
+	d.h1 = i32pairtou64(phpInt(state, 0), phpInt(state, 1))
+	d.h2 = i32pairtou64(phpInt(state, 2), phpInt(state, 3))
+	carry := uint32(phpInt(state, 5))
+	d.n = int(phpInt(state, 6))
 	for i := 0; i < d.n; i++ {
 		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
 	}
-	d.len = uint64(uint32(state[8]))
+	d.len = uint64(uint32(phpInt(state, 8)))
 	return nil
 }
 

@@ -58,33 +58,32 @@ func (d *tigerDigest) Clone() Hash {
 func (d *tigerDigest) PHPAlgo() string {
 	return fmt.Sprintf("tiger%d,%d", d.size*8, d.passes)
 }
-func (d *tigerDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 9)
+func (d *tigerDigest) MarshalPHP() []any {
+	state := make([]any, 0, 10)
 	for i := 0; i < 3; i++ {
 		lo, hi := u64toi32pair(d.s[i])
-		ints[i*2] = lo
-		ints[i*2+1] = hi
+		state = append(state, lo, hi)
 	}
 	count := d.len - uint64(d.bufLen)
 	lo, hi := u64toi32pair(count)
-	ints[6] = lo
-	ints[7] = hi
-	ints[8] = int32(d.bufLen)
+	state = append(state, lo, hi)
+	state = append(state, int32(d.bufLen))
 	buf := make([]byte, 64)
 	copy(buf, d.buf[:d.bufLen])
-	return ints, buf
+	state = append(state, buf)
+	return state
 }
-func (d *tigerDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 9 {
-		return fmt.Errorf("anyhash: tiger PHP state needs 9 ints, got %d", len(state))
+func (d *tigerDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 10 {
+		return fmt.Errorf("anyhash: tiger PHP state needs 10 elements, got %d", len(state))
 	}
 	for i := 0; i < 3; i++ {
-		d.s[i] = i32pairtou64(state[i*2], state[i*2+1])
+		d.s[i] = i32pairtou64(phpInt(state, i*2), phpInt(state, i*2+1))
 	}
-	count := i32pairtou64(state[6], state[7])
-	d.bufLen = int(state[8])
+	count := i32pairtou64(phpInt(state, 6), phpInt(state, 7))
+	d.bufLen = int(phpInt(state, 8))
 	d.len = count + uint64(d.bufLen)
-	copy(d.buf[:], buf)
+	copy(d.buf[:], phpBuf(state, 9))
 	return nil
 }
 

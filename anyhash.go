@@ -81,31 +81,29 @@ func NewHMAC(algo string, key []byte) (Hash, error) {
 }
 
 // PHPMarshaler is implemented by hashes that support PHP-compatible state
-// serialization. The state is represented as signed int32 values (matching
-// PHP's integer representation) plus a raw buffer.
+// serialization. The state array elements are int32 (matching PHP integers)
+// or []byte (matching PHP strings). This mirrors PHP's HashContext serialization.
 type PHPMarshaler interface {
 	// PHPAlgo returns the PHP-compatible algorithm name (e.g. "sha256", "tiger192,3").
 	PHPAlgo() string
-	// MarshalPHP returns the hash state as PHP-compatible int32 values and a buffer.
-	MarshalPHP() ([]int32, []byte)
-	// UnmarshalPHP restores the hash state from PHP-compatible int32 values and a buffer.
-	UnmarshalPHP(state []int32, buf []byte) error
+	// MarshalPHP returns the hash state as a PHP-compatible array.
+	// Elements are int32 or []byte, matching PHP's serialize() format.
+	MarshalPHP() []any
+	// UnmarshalPHP restores the hash state from a PHP-compatible array.
+	UnmarshalPHP(state []any) error
 }
 
 // MarshalPHP serializes a Hash's internal state into PHP-compatible components.
-// Returns the PHP algorithm name, state as int32 values, and the buffer.
-func MarshalPHP(h Hash) (algo string, state []int32, buf []byte, err error) {
+func MarshalPHP(h Hash) (algo string, state []any, err error) {
 	pm, ok := h.(PHPMarshaler)
 	if !ok {
-		return "", nil, nil, fmt.Errorf("anyhash: hash does not support PHP marshaling")
+		return "", nil, fmt.Errorf("anyhash: hash does not support PHP marshaling")
 	}
-	state, buf = pm.MarshalPHP()
-	return pm.PHPAlgo(), state, buf, nil
+	return pm.PHPAlgo(), pm.MarshalPHP(), nil
 }
 
 // UnmarshalPHP creates a Hash from PHP-compatible serialized state.
-// The algo name should be a PHP-compatible name (e.g. "sha256", "tiger192,3").
-func UnmarshalPHP(algo string, state []int32, buf []byte) (Hash, error) {
+func UnmarshalPHP(algo string, state []any) (Hash, error) {
 	h, err := New(algo)
 	if err != nil {
 		return nil, err
@@ -114,7 +112,7 @@ func UnmarshalPHP(algo string, state []int32, buf []byte) (Hash, error) {
 	if !ok {
 		return nil, fmt.Errorf("anyhash: algorithm %q does not support PHP marshaling", algo)
 	}
-	if err := pm.UnmarshalPHP(state, buf); err != nil {
+	if err := pm.UnmarshalPHP(state); err != nil {
 		return nil, err
 	}
 	return h, nil

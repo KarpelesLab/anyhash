@@ -18,18 +18,19 @@ func init() {
 // PHP SHA3 format: [bufPos(int)] + state(200 bytes)
 func makeSHA3Codec(rate byte) phpCodec {
 	return phpCodec{
-		marshal: func(goState []byte) ([]int32, []byte) {
+		marshal: func(goState []byte) []any {
 			// state is at offset 5, 200 bytes
-			state := make([]byte, 200)
-			copy(state, goState[5:205])
+			stateBuf := make([]byte, 200)
+			copy(stateBuf, goState[5:205])
 			// n is at offset 205, 2 bytes LE
 			n := int32(binary.LittleEndian.Uint16(goState[205:207]))
-			return []int32{n}, state
+			return []any{n, stateBuf}
 		},
-		unmarshal: func(ints []int32, buf []byte) ([]byte, error) {
-			if len(ints) < 1 {
-				return nil, fmt.Errorf("anyhash: sha3 PHP state needs 1 int, got %d", len(ints))
+		unmarshal: func(state []any) ([]byte, error) {
+			if len(state) < 2 {
+				return nil, fmt.Errorf("anyhash: sha3 PHP state needs 2 elements, got %d", len(state))
 			}
+			buf := phpBuf(state, 1)
 			if len(buf) < 200 {
 				return nil, fmt.Errorf("anyhash: sha3 PHP buffer needs 200 bytes, got %d", len(buf))
 			}
@@ -37,7 +38,7 @@ func makeSHA3Codec(rate byte) phpCodec {
 			copy(goState, "sha\x08")
 			goState[4] = rate
 			copy(goState[5:205], buf[:200])
-			binary.LittleEndian.PutUint16(goState[205:], uint16(ints[0]))
+			binary.LittleEndian.PutUint16(goState[205:], uint16(phpInt(state, 0)))
 			return goState, nil
 		},
 	}

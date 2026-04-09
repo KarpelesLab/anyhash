@@ -82,13 +82,13 @@ func TestPHPMarshalRoundtrip(t *testing.T) {
 			h.Write([]byte("abc"))
 
 			// Marshal
-			name, state, buf, err := MarshalPHP(h)
+			name, state, err := MarshalPHP(h)
 			if err != nil {
 				t.Fatalf("MarshalPHP: %v", err)
 			}
 
 			// Unmarshal into fresh hash
-			h2, err := UnmarshalPHP(name, state, buf)
+			h2, err := UnmarshalPHP(name, state)
 			if err != nil {
 				t.Fatalf("UnmarshalPHP: %v", err)
 			}
@@ -147,16 +147,24 @@ func TestPHPCrossValidation(t *testing.T) {
 			}
 			h.Write([]byte("Hello, World!"))
 
-			phpAlgo, state, buf, err := MarshalPHP(h)
+			phpAlgo, state, err := MarshalPHP(h)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_ = phpAlgo
 
-			// Check int32 values match PHP
-			goInts := make([]string, len(state))
-			for i, v := range state {
-				goInts[i] = fmt.Sprintf("%d", v)
+			// Convert state elements to string representations for comparison.
+			// int32 values become their decimal string, []byte values become hex-encoded strings
+			// separated from int runs by semicolons.
+			var goInts []string
+			var goBufs []string
+			for _, elem := range state {
+				switch val := elem.(type) {
+				case int32:
+					goInts = append(goInts, fmt.Sprintf("%d", val))
+				case []byte:
+					goBufs = append(goBufs, hex.EncodeToString(val))
+				}
 			}
 			gotInts := strings.Join(goInts, ",")
 			if gotInts != v.ints {
@@ -165,14 +173,14 @@ func TestPHPCrossValidation(t *testing.T) {
 
 			// Check buffer matches PHP (if specified)
 			if v.bufs != "" {
-				gotBuf := hex.EncodeToString(buf)
-				if gotBuf != v.bufs {
-					t.Errorf("buffer mismatch\ngot  %s\nwant %s", gotBuf, v.bufs)
+				gotBufs := strings.Join(goBufs, ";")
+				if gotBufs != v.bufs {
+					t.Errorf("buffer mismatch\ngot  %s\nwant %s", gotBufs, v.bufs)
 				}
 			}
 
 			// Verify roundtrip: unmarshal and continue hashing
-			h2, err := UnmarshalPHP(phpAlgo, state, buf)
+			h2, err := UnmarshalPHP(phpAlgo, state)
 			if err != nil {
 				t.Fatalf("UnmarshalPHP: %v", err)
 			}

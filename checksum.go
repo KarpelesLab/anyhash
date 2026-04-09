@@ -65,13 +65,13 @@ func (c *crc32MSB) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (c *crc32MSB) PHPAlgo() string              { return "crc32" }
-func (c *crc32MSB) MarshalPHP() ([]int32, []byte) { return []int32{int32(c.state)}, nil }
-func (c *crc32MSB) UnmarshalPHP(state []int32, buf []byte) error {
+func (c *crc32MSB) PHPAlgo() string    { return "crc32" }
+func (c *crc32MSB) MarshalPHP() []any  { return []any{int32(c.state)} }
+func (c *crc32MSB) UnmarshalPHP(state []any) error {
 	if len(state) < 1 {
-		return fmt.Errorf("anyhash: crc32 PHP state needs 1 int")
+		return fmt.Errorf("anyhash: crc32 PHP state needs 1 element")
 	}
-	c.state = uint32(state[0])
+	c.state = uint32(phpInt(state, 0))
 	return nil
 }
 

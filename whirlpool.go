@@ -52,41 +52,47 @@ func (d *whirlpoolDigest) Clone() Hash {
 // 16 ints for state + 32 bytes for bitLength + 2 ints + 64 bytes buffer.
 // The bitLength and buffer are encoded as byte strings.
 func (d *whirlpoolDigest) PHPAlgo() string { return "whirlpool" }
-func (d *whirlpoolDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 18)
+func (d *whirlpoolDigest) MarshalPHP() []any {
+	result := make([]any, 0, 21)
 	// State: each uint64 as (hi, lo) pair
 	for i := 0; i < 8; i++ {
-		ints[i*2] = int32(uint32(d.state[i] >> 32))  // hi
-		ints[i*2+1] = int32(uint32(d.state[i]))       // lo
+		result = append(result, int32(uint32(d.state[i]>>32))) // hi
+		result = append(result, int32(uint32(d.state[i])))     // lo
 	}
-	ints[16] = int32(d.bufLen * 8) // bufferBits
-	ints[17] = int32(d.bufLen)     // bufferPos
-	// Build byte buffer: bitLength(32 bytes) + buffer(64 bytes)
-	buf := make([]byte, 96)
-	// bitLen is [4]uint64 big-endian
+	result = append(result, int32(d.bufLen*8)) // bufferBits
+	result = append(result, int32(d.bufLen))   // bufferPos
+	// bitLength as 32 bytes
+	bitLenBuf := make([]byte, 32)
 	for i := 0; i < 4; i++ {
-		binary.BigEndian.PutUint64(buf[i*8:], d.bitLen[i])
+		binary.BigEndian.PutUint64(bitLenBuf[i*8:], d.bitLen[i])
 	}
-	copy(buf[32:], d.buffer[:])
-	return ints, buf
+	result = append(result, bitLenBuf)
+	// buffer as 64 bytes
+	bufBytes := make([]byte, 64)
+	copy(bufBytes, d.buffer[:])
+	result = append(result, bufBytes)
+	return result
 }
-func (d *whirlpoolDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 18 {
-		return fmt.Errorf("anyhash: whirlpool PHP state needs 18 ints, got %d", len(state))
-	}
-	if len(buf) < 96 {
-		return fmt.Errorf("anyhash: whirlpool PHP buffer needs 96 bytes, got %d", len(buf))
+func (d *whirlpoolDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 20 {
+		return fmt.Errorf("anyhash: whirlpool PHP state needs 20 elements, got %d", len(state))
 	}
 	for i := 0; i < 8; i++ {
-		hi := uint64(uint32(state[i*2]))
-		lo := uint64(uint32(state[i*2+1]))
+		hi := uint64(uint32(phpInt(state, i*2)))
+		lo := uint64(uint32(phpInt(state, i*2+1)))
 		d.state[i] = (hi << 32) | lo
 	}
-	d.bufLen = int(state[17]) // bufferPos
-	for i := 0; i < 4; i++ {
-		d.bitLen[i] = binary.BigEndian.Uint64(buf[i*8:])
+	d.bufLen = int(phpInt(state, 17)) // bufferPos
+	bitLenBuf := phpBuf(state, 18)
+	if len(bitLenBuf) >= 32 {
+		for i := 0; i < 4; i++ {
+			d.bitLen[i] = binary.BigEndian.Uint64(bitLenBuf[i*8:])
+		}
 	}
-	copy(d.buffer[:], buf[32:])
+	bufBytes := phpBuf(state, 19)
+	if len(bufBytes) > 0 {
+		copy(d.buffer[:], bufBytes)
+	}
 	return nil
 }
 

@@ -64,30 +64,30 @@ func (d *havalDigest) Clone() Hash {
 func (d *havalDigest) PHPAlgo() string {
 	return fmt.Sprintf("haval%d,%d", d.size, d.passes)
 }
-func (d *havalDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 10)
+func (d *havalDigest) MarshalPHP() []any {
+	state := make([]any, 0, 11)
 	for i := 0; i < 8; i++ {
-		ints[i] = int32(d.s[i])
+		state = append(state, int32(d.s[i]))
 	}
 	bitCount := d.len * 8
 	lo, hi := u64toi32pair(bitCount)
-	ints[8] = lo
-	ints[9] = hi
+	state = append(state, lo, hi)
 	buf := make([]byte, 128)
 	bufLen := int(d.len % havalBlockSize)
 	copy(buf, d.buf[:bufLen])
-	return ints, buf
+	state = append(state, buf)
+	return state
 }
-func (d *havalDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 10 {
-		return fmt.Errorf("anyhash: haval PHP state needs 10 ints, got %d", len(state))
+func (d *havalDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 11 {
+		return fmt.Errorf("anyhash: haval PHP state needs 11 elements, got %d", len(state))
 	}
 	for i := 0; i < 8; i++ {
-		d.s[i] = uint32(state[i])
+		d.s[i] = uint32(phpInt(state, i))
 	}
-	bitCount := i32pairtou64(state[8], state[9])
+	bitCount := i32pairtou64(phpInt(state, 8), phpInt(state, 9))
 	d.len = bitCount / 8
-	copy(d.buf[:], buf)
+	copy(d.buf[:], phpBuf(state, 10))
 	return nil
 }
 

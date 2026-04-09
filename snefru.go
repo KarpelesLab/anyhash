@@ -60,30 +60,35 @@ func (d *snefruDigest) Clone() Hash {
 // PHP format: [state0..state7, extra0..extra7(zeros), ???, bitCountLo, bufLen] + buffer(32)
 // Total: 19 ints + 32-byte buffer. PHP uses "snefru" for both snefru128 and snefru256.
 func (d *snefruDigest) PHPAlgo() string { return "snefru" }
-func (d *snefruDigest) MarshalPHP() ([]int32, []byte) {
-	ints := make([]int32, 19)
+func (d *snefruDigest) MarshalPHP() []any {
+	state := make([]any, 0, 20)
 	for i := 0; i < 8; i++ {
-		ints[i] = int32(d.state[i])
+		state = append(state, int32(d.state[i]))
 	}
-	// ints[8..15] are zeros (extra state, unused)
-	// ints[16] is zero (unused)
+	// 8 zeros (extra state, unused)
+	for i := 0; i < 8; i++ {
+		state = append(state, int32(0))
+	}
+	// 1 zero (unused)
+	state = append(state, int32(0))
 	bitCount := d.len * 8
-	ints[17] = int32(uint32(bitCount))
-	ints[18] = int32(d.bufLen)
+	state = append(state, int32(uint32(bitCount)))
+	state = append(state, int32(d.bufLen))
 	buf := make([]byte, 32)
 	copy(buf, d.buf[:d.bufLen])
-	return ints, buf
+	state = append(state, buf)
+	return state
 }
-func (d *snefruDigest) UnmarshalPHP(state []int32, buf []byte) error {
-	if len(state) < 19 {
-		return fmt.Errorf("anyhash: snefru PHP state needs 19 ints, got %d", len(state))
+func (d *snefruDigest) UnmarshalPHP(state []any) error {
+	if len(state) < 20 {
+		return fmt.Errorf("anyhash: snefru PHP state needs 20 elements, got %d", len(state))
 	}
 	for i := 0; i < 8; i++ {
-		d.state[i] = uint32(state[i])
+		d.state[i] = uint32(phpInt(state, i))
 	}
-	d.len = uint64(uint32(state[17])) / 8
-	d.bufLen = int(state[18])
-	copy(d.buf[:], buf)
+	d.len = uint64(uint32(phpInt(state, 17))) / 8
+	d.bufLen = int(phpInt(state, 18))
+	copy(d.buf[:], phpBuf(state, 19))
 	return nil
 }
 
