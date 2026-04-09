@@ -2,6 +2,8 @@ package anyhash
 
 // MD2 implementation per RFC 1319.
 
+import "fmt"
+
 const md2BlockSize = 16
 const md2Size = 16
 
@@ -47,6 +49,31 @@ func (d *md2digest) Reset() {
 func (d *md2digest) Clone() Hash {
 	c := *d
 	return &c
+}
+
+// PHP format: MD2 is special - state is stored as byte strings, not int32 values.
+// ints=[bufLen], buf=state(48)+checksum(16)+buf(16)=80 bytes
+func (d *md2digest) PHPAlgo() string { return "md2" }
+func (d *md2digest) MarshalPHP() ([]int32, []byte) {
+	ints := []int32{int32(d.bufLen)}
+	buf := make([]byte, 80)
+	copy(buf[0:48], d.state[:])
+	copy(buf[48:64], d.checksum[:])
+	copy(buf[64:80], d.buf[:])
+	return ints, buf
+}
+func (d *md2digest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 1 {
+		return fmt.Errorf("anyhash: md2 PHP state needs 1 int, got %d", len(state))
+	}
+	if len(buf) < 80 {
+		return fmt.Errorf("anyhash: md2 PHP buffer needs 80 bytes, got %d", len(buf))
+	}
+	d.bufLen = int(state[0])
+	copy(d.state[:], buf[0:48])
+	copy(d.checksum[:], buf[48:64])
+	copy(d.buf[:], buf[64:80])
+	return nil
 }
 
 func (d *md2digest) Write(p []byte) (int, error) {

@@ -3,7 +3,10 @@ package anyhash
 // Tiger hash algorithm implementation.
 // Supports tiger128,3 tiger160,3 tiger192,3 tiger128,4 tiger160,4 tiger192,4.
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 func init() {
 	registerHash("tiger128,3", func() Hash { return newTiger(16, 3) })
@@ -48,6 +51,41 @@ func (d *tigerDigest) Reset() {
 func (d *tigerDigest) Clone() Hash {
 	c := *d
 	return &c
+}
+
+// PHP format: [s0_lo,s0_hi, s1_lo,s1_hi, s2_lo,s2_hi, countLo,countHi] + buffer(64) + trailing int (bufLen)
+// Total: 9 ints + 64-byte buffer. The count is the number of processed bytes (len - bufLen).
+func (d *tigerDigest) PHPAlgo() string {
+	return fmt.Sprintf("tiger%d,%d", d.size*8, d.passes)
+}
+func (d *tigerDigest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 9)
+	for i := 0; i < 3; i++ {
+		lo, hi := u64toi32pair(d.s[i])
+		ints[i*2] = lo
+		ints[i*2+1] = hi
+	}
+	count := d.len - uint64(d.bufLen)
+	lo, hi := u64toi32pair(count)
+	ints[6] = lo
+	ints[7] = hi
+	ints[8] = int32(d.bufLen)
+	buf := make([]byte, 64)
+	copy(buf, d.buf[:d.bufLen])
+	return ints, buf
+}
+func (d *tigerDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 9 {
+		return fmt.Errorf("anyhash: tiger PHP state needs 9 ints, got %d", len(state))
+	}
+	for i := 0; i < 3; i++ {
+		d.s[i] = i32pairtou64(state[i*2], state[i*2+1])
+	}
+	count := i32pairtou64(state[6], state[7])
+	d.bufLen = int(state[8])
+	d.len = count + uint64(d.bufLen)
+	copy(d.buf[:], buf)
+	return nil
 }
 
 func (d *tigerDigest) Write(p []byte) (int, error) {

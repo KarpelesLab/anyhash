@@ -4,6 +4,7 @@ package anyhash
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 )
 
@@ -20,13 +21,15 @@ const ripemdBlockSize = 64
 type ripemdVariant struct {
 	size     int        // digest size in bytes
 	nstate   int        // number of state words
+	phpName  string     // PHP algorithm name
 	iv       [10]uint32 // initial state values
 	compress func(s []uint32, block []byte)
 }
 
 var ripemd128params = &ripemdVariant{
-	size:   16,
-	nstate: 4,
+	size:    16,
+	nstate:  4,
+	phpName: "ripemd128",
 	iv: [10]uint32{
 		0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476,
 	},
@@ -34,8 +37,9 @@ var ripemd128params = &ripemdVariant{
 }
 
 var ripemd160params = &ripemdVariant{
-	size:   20,
-	nstate: 5,
+	size:    20,
+	nstate:  5,
+	phpName: "ripemd160",
 	iv: [10]uint32{
 		0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0,
 	},
@@ -43,8 +47,9 @@ var ripemd160params = &ripemdVariant{
 }
 
 var ripemd256params = &ripemdVariant{
-	size:   32,
-	nstate: 8,
+	size:    32,
+	nstate:  8,
+	phpName: "ripemd256",
 	iv: [10]uint32{
 		0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476,
 		0x76543210, 0xfedcba98, 0x89abcdef, 0x01234567,
@@ -53,8 +58,9 @@ var ripemd256params = &ripemdVariant{
 }
 
 var ripemd320params = &ripemdVariant{
-	size:   40,
-	nstate: 10,
+	size:    40,
+	nstate:  10,
+	phpName: "ripemd320",
 	iv: [10]uint32{
 		0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0,
 		0x76543210, 0xfedcba98, 0x89abcdef, 0x01234567, 0x3c2d1e0f,
@@ -86,6 +92,37 @@ func (d *ripemdDigest) Reset() {
 func (d *ripemdDigest) Clone() Hash {
 	c := *d
 	return &c
+}
+
+// PHP format: [h0..h(nstate-1), bitCountLo, bitCountHi] + buffer(64)
+func (d *ripemdDigest) PHPAlgo() string { return d.params.phpName }
+func (d *ripemdDigest) MarshalPHP() ([]int32, []byte) {
+	n := d.params.nstate
+	ints := make([]int32, n+2)
+	for i := 0; i < n; i++ {
+		ints[i] = int32(d.s[i])
+	}
+	bitCount := d.len * 8
+	lo, hi := u64toi32pair(bitCount)
+	ints[n] = lo
+	ints[n+1] = hi
+	buf := make([]byte, 64)
+	bufLen := int(d.len % ripemdBlockSize)
+	copy(buf, d.buf[:bufLen])
+	return ints, buf
+}
+func (d *ripemdDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	n := d.params.nstate
+	if len(state) < n+2 {
+		return fmt.Errorf("anyhash: %s PHP state needs %d ints, got %d", d.params.phpName, n+2, len(state))
+	}
+	for i := 0; i < n; i++ {
+		d.s[i] = uint32(state[i])
+	}
+	bitCount := i32pairtou64(state[n], state[n+1])
+	d.len = bitCount / 8
+	copy(d.buf[:], buf)
+	return nil
 }
 
 func (d *ripemdDigest) Write(p []byte) (int, error) {

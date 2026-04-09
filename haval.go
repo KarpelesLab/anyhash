@@ -60,6 +60,37 @@ func (d *havalDigest) Clone() Hash {
 	return &c
 }
 
+// PHP format: [h0..h7, bitCountLo, bitCountHi] + buffer(128)
+func (d *havalDigest) PHPAlgo() string {
+	return fmt.Sprintf("haval%d,%d", d.size, d.passes)
+}
+func (d *havalDigest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 10)
+	for i := 0; i < 8; i++ {
+		ints[i] = int32(d.s[i])
+	}
+	bitCount := d.len * 8
+	lo, hi := u64toi32pair(bitCount)
+	ints[8] = lo
+	ints[9] = hi
+	buf := make([]byte, 128)
+	bufLen := int(d.len % havalBlockSize)
+	copy(buf, d.buf[:bufLen])
+	return ints, buf
+}
+func (d *havalDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 10 {
+		return fmt.Errorf("anyhash: haval PHP state needs 10 ints, got %d", len(state))
+	}
+	for i := 0; i < 8; i++ {
+		d.s[i] = uint32(state[i])
+	}
+	bitCount := i32pairtou64(state[8], state[9])
+	d.len = bitCount / 8
+	copy(d.buf[:], buf)
+	return nil
+}
+
 func (d *havalDigest) Write(p []byte) (int, error) {
 	n := len(p)
 	d.len += uint64(n)

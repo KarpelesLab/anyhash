@@ -11,6 +11,7 @@ package anyhash
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 )
 
@@ -45,6 +46,48 @@ func (d *whirlpoolDigest) Reset() {
 func (d *whirlpoolDigest) Clone() Hash {
 	c := *d
 	return &c
+}
+
+// PHP format: [state0_hi,state0_lo,...,state7_hi,state7_lo, bitLengthBuf(32 bytes), bufferBits, bufferPos] + buffer(64)
+// 16 ints for state + 32 bytes for bitLength + 2 ints + 64 bytes buffer.
+// The bitLength and buffer are encoded as byte strings.
+func (d *whirlpoolDigest) PHPAlgo() string { return "whirlpool" }
+func (d *whirlpoolDigest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 18)
+	// State: each uint64 as (hi, lo) pair
+	for i := 0; i < 8; i++ {
+		ints[i*2] = int32(uint32(d.state[i] >> 32))  // hi
+		ints[i*2+1] = int32(uint32(d.state[i]))       // lo
+	}
+	ints[16] = int32(d.bufLen * 8) // bufferBits
+	ints[17] = int32(d.bufLen)     // bufferPos
+	// Build byte buffer: bitLength(32 bytes) + buffer(64 bytes)
+	buf := make([]byte, 96)
+	// bitLen is [4]uint64 big-endian
+	for i := 0; i < 4; i++ {
+		binary.BigEndian.PutUint64(buf[i*8:], d.bitLen[i])
+	}
+	copy(buf[32:], d.buffer[:])
+	return ints, buf
+}
+func (d *whirlpoolDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 18 {
+		return fmt.Errorf("anyhash: whirlpool PHP state needs 18 ints, got %d", len(state))
+	}
+	if len(buf) < 96 {
+		return fmt.Errorf("anyhash: whirlpool PHP buffer needs 96 bytes, got %d", len(buf))
+	}
+	for i := 0; i < 8; i++ {
+		hi := uint64(uint32(state[i*2]))
+		lo := uint64(uint32(state[i*2+1]))
+		d.state[i] = (hi << 32) | lo
+	}
+	d.bufLen = int(state[17]) // bufferPos
+	for i := 0; i < 4; i++ {
+		d.bitLen[i] = binary.BigEndian.Uint64(buf[i*8:])
+	}
+	copy(d.buffer[:], buf[32:])
+	return nil
 }
 
 func (d *whirlpoolDigest) Write(p []byte) (int, error) {

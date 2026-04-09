@@ -4,6 +4,7 @@ package anyhash
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 )
 
@@ -50,6 +51,41 @@ func (d *xxh32Digest) Reset() {
 	d.v4 = seed - xxh32p1
 	d.n = 0
 	d.len = 0
+}
+
+// PHP format: [lenLo, lenHi, v1, v2, v3, v4, buf_as_4_uint32_LE, bufCount, 0] — 12 ints, no buffer.
+func (d *xxh32Digest) PHPAlgo() string { return "xxh32" }
+func (d *xxh32Digest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 12)
+	lo, hi := u64toi32pair(uint64(d.len))
+	ints[0] = lo
+	ints[1] = hi
+	ints[2] = int32(d.v1)
+	ints[3] = int32(d.v2)
+	ints[4] = int32(d.v3)
+	ints[5] = int32(d.v4)
+	// Buffer as 4 little-endian uint32s
+	for i := 0; i < 4; i++ {
+		ints[6+i] = int32(binary.LittleEndian.Uint32(d.buf[i*4:]))
+	}
+	ints[10] = int32(d.n)
+	ints[11] = 0
+	return ints, nil
+}
+func (d *xxh32Digest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 12 {
+		return fmt.Errorf("anyhash: xxh32 PHP state needs 12 ints, got %d", len(state))
+	}
+	d.len = uint32(i32pairtou64(state[0], state[1]))
+	d.v1 = uint32(state[2])
+	d.v2 = uint32(state[3])
+	d.v3 = uint32(state[4])
+	d.v4 = uint32(state[5])
+	for i := 0; i < 4; i++ {
+		binary.LittleEndian.PutUint32(d.buf[i*4:], uint32(state[6+i]))
+	}
+	d.n = int(state[10])
+	return nil
 }
 
 func (d *xxh32Digest) Write(p []byte) (int, error) {
@@ -163,6 +199,44 @@ func (d *xxh64Digest) Reset() {
 	d.v4 = seed - xxh64p1
 	d.n = 0
 	d.len = 0
+}
+
+// PHP format: [lenLo, lenHi, v1_lo,v1_hi, v2_lo,v2_hi, v3_lo,v3_hi, v4_lo,v4_hi, buf_as_8_uint32_LE, bufCount, 0, 0, 0] — 22 ints, no buffer.
+func (d *xxh64Digest) PHPAlgo() string { return "xxh64" }
+func (d *xxh64Digest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 22)
+	lo, hi := u64toi32pair(d.len)
+	ints[0] = lo
+	ints[1] = hi
+	for i, v := range []uint64{d.v1, d.v2, d.v3, d.v4} {
+		lo, hi := u64toi32pair(v)
+		ints[2+i*2] = lo
+		ints[3+i*2] = hi
+	}
+	// Buffer as 8 little-endian uint32s
+	for i := 0; i < 8; i++ {
+		ints[10+i] = int32(binary.LittleEndian.Uint32(d.buf[i*4:]))
+	}
+	ints[18] = int32(d.n)
+	ints[19] = 0
+	ints[20] = 0
+	ints[21] = 0
+	return ints, nil
+}
+func (d *xxh64Digest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 22 {
+		return fmt.Errorf("anyhash: xxh64 PHP state needs 22 ints, got %d", len(state))
+	}
+	d.len = i32pairtou64(state[0], state[1])
+	d.v1 = i32pairtou64(state[2], state[3])
+	d.v2 = i32pairtou64(state[4], state[5])
+	d.v3 = i32pairtou64(state[6], state[7])
+	d.v4 = i32pairtou64(state[8], state[9])
+	for i := 0; i < 8; i++ {
+		binary.LittleEndian.PutUint32(d.buf[i*4:], uint32(state[10+i]))
+	}
+	d.n = int(state[18])
+	return nil
 }
 
 func (d *xxh64Digest) Write(p []byte) (int, error) {

@@ -2,11 +2,14 @@ package anyhash
 
 // GOST R 34.11-94 hash function with GOST 28147-89 block cipher.
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 func init() {
-	registerHash("gost", func() Hash { return newGOST(&gostTestSbox) })
-	registerHash("gostcrypto", func() Hash { return newGOST(&gostCryptoProSbox) })
+	registerHash("gost", func() Hash { return newGOST(&gostTestSbox, "gost") })
+	registerHash("gostcrypto", func() Hash { return newGOST(&gostCryptoProSbox, "gost-crypto") })
 }
 
 // S-box tables for GOST 28147-89, each row maps 4 bits to 4 bits.
@@ -35,16 +38,17 @@ var gostCryptoProSbox = gostSbox{
 }
 
 type gostDigest struct {
-	h      [32]byte
-	sum    [32]byte
-	buf    [32]byte
-	bufLen int
-	length uint64
-	sbox   *gostSbox
+	h       [32]byte
+	sum     [32]byte
+	buf     [32]byte
+	bufLen  int
+	length  uint64
+	sbox    *gostSbox
+	phpAlgo string
 }
 
-func newGOST(sbox *gostSbox) *gostDigest {
-	return &gostDigest{sbox: sbox}
+func newGOST(sbox *gostSbox, phpAlgo string) *gostDigest {
+	return &gostDigest{sbox: sbox, phpAlgo: phpAlgo}
 }
 
 func (d *gostDigest) Size() int      { return 32 }
@@ -61,6 +65,43 @@ func (d *gostDigest) Reset() {
 func (d *gostDigest) Clone() Hash {
 	c := *d
 	return &c
+}
+
+// PHP format: [h_as_8_uint32_LE, sum_as_8_uint32_LE, bitCountLo, bitCountHi, bufLen] + buffer(32)
+// Total: 19 ints + 32-byte buffer.
+func (d *gostDigest) PHPAlgo() string { return d.phpAlgo }
+func (d *gostDigest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 19)
+	for i := 0; i < 8; i++ {
+		ints[i] = int32(binary.LittleEndian.Uint32(d.h[i*4:]))
+	}
+	for i := 0; i < 8; i++ {
+		ints[8+i] = int32(binary.LittleEndian.Uint32(d.sum[i*4:]))
+	}
+	bitCount := d.length * 8
+	lo, hi := u64toi32pair(bitCount)
+	ints[16] = lo
+	ints[17] = hi
+	ints[18] = int32(d.bufLen)
+	buf := make([]byte, 32)
+	copy(buf, d.buf[:d.bufLen])
+	return ints, buf
+}
+func (d *gostDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 19 {
+		return fmt.Errorf("anyhash: gost PHP state needs 19 ints, got %d", len(state))
+	}
+	for i := 0; i < 8; i++ {
+		binary.LittleEndian.PutUint32(d.h[i*4:], uint32(state[i]))
+	}
+	for i := 0; i < 8; i++ {
+		binary.LittleEndian.PutUint32(d.sum[i*4:], uint32(state[8+i]))
+	}
+	bitCount := i32pairtou64(state[16], state[17])
+	d.length = bitCount / 8
+	d.bufLen = int(state[18])
+	copy(d.buf[:], buf)
+	return nil
 }
 
 func (d *gostDigest) Write(p []byte) (int, error) {

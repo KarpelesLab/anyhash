@@ -6,6 +6,7 @@ package anyhash
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 )
 
@@ -32,6 +33,31 @@ func (d *murmur3aDigest) Size() int      { return 4 }
 func (d *murmur3aDigest) BlockSize() int { return 4 }
 func (d *murmur3aDigest) Reset()         { *d = murmur3aDigest{} }
 func (d *murmur3aDigest) Clone() Hash    { c := *d; return &c }
+
+// PHP format: [h1, carry, len] — 3 ints, no buffer.
+// carry = n | (buf[0] << 8) | (buf[1] << 16) | (buf[2] << 24)
+func (d *murmur3aDigest) PHPAlgo() string { return "murmur3a" }
+func (d *murmur3aDigest) MarshalPHP() ([]int32, []byte) {
+	var carry uint32
+	carry = uint32(d.n)
+	for i := 0; i < d.n; i++ {
+		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
+	}
+	return []int32{int32(d.h1), int32(carry), int32(d.len)}, nil
+}
+func (d *murmur3aDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 3 {
+		return fmt.Errorf("anyhash: murmur3a PHP state needs 3 ints, got %d", len(state))
+	}
+	d.h1 = uint32(state[0])
+	carry := uint32(state[1])
+	d.n = int(carry & 0xFF)
+	for i := 0; i < d.n; i++ {
+		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
+	}
+	d.len = uint32(state[2])
+	return nil
+}
 
 func (d *murmur3aDigest) Write(p []byte) (int, error) {
 	total := len(p)
@@ -118,6 +144,43 @@ func (d *murmur3cDigest) Size() int      { return 16 }
 func (d *murmur3cDigest) BlockSize() int { return 16 }
 func (d *murmur3cDigest) Reset()         { *d = murmur3cDigest{} }
 func (d *murmur3cDigest) Clone() Hash    { c := *d; return &c }
+
+// PHP format: [h1, h2, h3, h4, carry, ?, ?, carryLen, totalLen] — 9 ints, no buffer.
+// carry = buf[0]<<8 | buf[1]<<16 | buf[2]<<24 ... (no count in byte 0)
+func (d *murmur3cDigest) PHPAlgo() string { return "murmur3c" }
+func (d *murmur3cDigest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 9)
+	ints[0] = int32(d.h1)
+	ints[1] = int32(d.h2)
+	ints[2] = int32(d.h3)
+	ints[3] = int32(d.h4)
+	var carry uint32
+	for i := 0; i < d.n; i++ {
+		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
+	}
+	ints[4] = int32(carry)
+	ints[5] = 0
+	ints[6] = 0
+	ints[7] = int32(d.n)
+	ints[8] = int32(d.len)
+	return ints, nil
+}
+func (d *murmur3cDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 9 {
+		return fmt.Errorf("anyhash: murmur3c PHP state needs 9 ints, got %d", len(state))
+	}
+	d.h1 = uint32(state[0])
+	d.h2 = uint32(state[1])
+	d.h3 = uint32(state[2])
+	d.h4 = uint32(state[3])
+	carry := uint32(state[4])
+	d.n = int(state[7])
+	for i := 0; i < d.n; i++ {
+		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
+	}
+	d.len = uint32(state[8])
+	return nil
+}
 
 func (d *murmur3cDigest) Write(p []byte) (int, error) {
 	total := len(p)
@@ -304,6 +367,43 @@ func (d *murmur3fDigest) Size() int      { return 16 }
 func (d *murmur3fDigest) BlockSize() int { return 16 }
 func (d *murmur3fDigest) Reset()         { *d = murmur3fDigest{} }
 func (d *murmur3fDigest) Clone() Hash    { c := *d; return &c }
+
+// PHP format: [h1_lo, h1_hi, h2_lo, h2_hi, ?, carry, carryLen, ?, totalLen] — 9 ints, no buffer.
+// carry = buf[0]<<8 | buf[1]<<16 | buf[2]<<24 ... (same encoding as murmur3c)
+func (d *murmur3fDigest) PHPAlgo() string { return "murmur3f" }
+func (d *murmur3fDigest) MarshalPHP() ([]int32, []byte) {
+	ints := make([]int32, 9)
+	lo, hi := u64toi32pair(d.h1)
+	ints[0] = lo
+	ints[1] = hi
+	lo, hi = u64toi32pair(d.h2)
+	ints[2] = lo
+	ints[3] = hi
+	ints[4] = 0
+	var carry uint32
+	for i := 0; i < d.n; i++ {
+		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
+	}
+	ints[5] = int32(carry)
+	ints[6] = int32(d.n)
+	ints[7] = 0
+	ints[8] = int32(d.len)
+	return ints, nil
+}
+func (d *murmur3fDigest) UnmarshalPHP(state []int32, buf []byte) error {
+	if len(state) < 9 {
+		return fmt.Errorf("anyhash: murmur3f PHP state needs 9 ints, got %d", len(state))
+	}
+	d.h1 = i32pairtou64(state[0], state[1])
+	d.h2 = i32pairtou64(state[2], state[3])
+	carry := uint32(state[5])
+	d.n = int(state[6])
+	for i := 0; i < d.n; i++ {
+		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
+	}
+	d.len = uint64(uint32(state[8]))
+	return nil
+}
 
 func (d *murmur3fDigest) Write(p []byte) (int, error) {
 	total := len(p)
