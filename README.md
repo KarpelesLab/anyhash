@@ -1,5 +1,10 @@
 # anyhash
 
+[![GoDoc](https://pkg.go.dev/badge/github.com/KarpelesLab/anyhash)](https://pkg.go.dev/github.com/KarpelesLab/anyhash)
+[![Build Status](https://github.com/KarpelesLab/anyhash/actions/workflows/test.yml/badge.svg)](https://github.com/KarpelesLab/anyhash/actions/workflows/test.yml)
+[![Coverage Status](https://coveralls.io/repos/github/KarpelesLab/anyhash/badge.svg?branch=master)](https://coveralls.io/github/KarpelesLab/anyhash?branch=master)
+[![Go Report Card](https://goreportcard.com/badge/github.com/KarpelesLab/anyhash)](https://goreportcard.com/report/github.com/KarpelesLab/anyhash)
+
 A Go hashing library that supports 60 hash algorithms selected by name. Unlike Go's standard crypto packages, anyhash accepts algorithm names as strings and provides a `Clone()` method to duplicate hash state at any point during computation.
 
 ## Features
