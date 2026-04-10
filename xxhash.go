@@ -77,6 +77,10 @@ func (d *xxh32Digest) UnmarshalPHP(state []any) error {
 	if len(state) < 12 {
 		return fmt.Errorf("anyhash: xxh32 PHP state needs 12 elements, got %d", len(state))
 	}
+	n := int(phpInt(state, 10))
+	if n < 0 || n >= len(d.buf) {
+		return fmt.Errorf("anyhash: xxh32 PHP state has invalid buffer length %d", n)
+	}
 	d.len = uint32(i32pairtou64(phpInt(state, 0), phpInt(state, 1)))
 	d.v1 = uint32(phpInt(state, 2))
 	d.v2 = uint32(phpInt(state, 3))
@@ -85,7 +89,7 @@ func (d *xxh32Digest) UnmarshalPHP(state []any) error {
 	for i := 0; i < 4; i++ {
 		binary.LittleEndian.PutUint32(d.buf[i*4:], uint32(phpInt(state, 6+i)))
 	}
-	d.n = int(phpInt(state, 10))
+	d.n = n
 	return nil
 }
 
@@ -228,6 +232,10 @@ func (d *xxh64Digest) UnmarshalPHP(state []any) error {
 	if len(state) < 22 {
 		return fmt.Errorf("anyhash: xxh64 PHP state needs 22 elements, got %d", len(state))
 	}
+	n := int(phpInt(state, 18))
+	if n < 0 || n >= len(d.buf) {
+		return fmt.Errorf("anyhash: xxh64 PHP state has invalid buffer length %d", n)
+	}
 	d.len = i32pairtou64(phpInt(state, 0), phpInt(state, 1))
 	d.v1 = i32pairtou64(phpInt(state, 2), phpInt(state, 3))
 	d.v2 = i32pairtou64(phpInt(state, 4), phpInt(state, 5))
@@ -236,7 +244,7 @@ func (d *xxh64Digest) UnmarshalPHP(state []any) error {
 	for i := 0; i < 8; i++ {
 		binary.LittleEndian.PutUint32(d.buf[i*4:], uint32(phpInt(state, 10+i)))
 	}
-	d.n = int(phpInt(state, 18))
+	d.n = n
 	return nil
 }
 
@@ -729,7 +737,7 @@ func (d *xxh3Digest) xxh3Len17to128_128(input []byte) (uint64, uint64) {
 	accLo, accHi = xxh3Mix32(accLo, accHi, input[0:], input[l-16:], xxh3Secret[0:], d.seed)
 
 	h128Lo := accLo + accHi
-	h128Hi := (accLo * xxh64p1) + (accHi * xxh64p4) + (l * xxh64p2)
+	h128Hi := (accLo * xxh64p1) + (accHi * xxh64p4) + ((l - d.seed) * xxh64p2)
 	h128Lo = xxh3Avalanche64(h128Lo)
 	h128Hi = 0 - xxh3Avalanche64(h128Hi)
 	return h128Lo, h128Hi

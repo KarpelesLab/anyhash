@@ -163,17 +163,31 @@ func (d *murmur3cDigest) Reset() {
 }
 func (d *murmur3cDigest) Clone() Hash    { c := *d; return &c }
 
-// PHP format: [h1, h2, h3, h4, carry, ?, ?, carryLen, totalLen] — 9 ints, no buffer.
-// carry = buf[0]<<8 | buf[1]<<16 | buf[2]<<24 ... (no count in byte 0)
+// PHP format: [h0..h3, carry[0..3], len] — 9 int32s (PHP_MURMUR3C_SPEC "lllllllll").
+// carry[0..3] is a 16-byte buffer where full uint32s are raw little-endian and a
+// partial uint32 packs bytes toward the high end (byte i at position (4-n_partial+i)).
+// The low byte of carry[3] holds the carry length (0..15), per PHP's
+// pcarry[3] = (k4 & ~0xff) | n.
 func (d *murmur3cDigest) PHPAlgo() string { return "murmur3c" }
 func (d *murmur3cDigest) MarshalPHP() []any {
-	var carry uint32
-	for i := 0; i < d.n; i++ {
-		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
+	var carry [4]uint32
+	nFull := d.n / 4
+	partial := d.n % 4
+	for i := 0; i < nFull; i++ {
+		carry[i] = binary.LittleEndian.Uint32(d.buf[i*4:])
 	}
+	if partial > 0 {
+		var pk uint32
+		for i := 0; i < partial; i++ {
+			pk |= uint32(d.buf[nFull*4+i]) << ((4 - partial + i) * 8)
+		}
+		carry[nFull] = pk
+	}
+	carry[3] = (carry[3] &^ 0xff) | uint32(d.n)
 	return []any{
 		int32(d.h1), int32(d.h2), int32(d.h3), int32(d.h4),
-		int32(carry), int32(0), int32(0), int32(d.n), int32(d.len),
+		int32(carry[0]), int32(carry[1]), int32(carry[2]), int32(carry[3]),
+		int32(d.len),
 	}
 }
 func (d *murmur3cDigest) UnmarshalPHP(state []any) error {
@@ -184,12 +198,25 @@ func (d *murmur3cDigest) UnmarshalPHP(state []any) error {
 	d.h2 = uint32(phpInt(state, 1))
 	d.h3 = uint32(phpInt(state, 2))
 	d.h4 = uint32(phpInt(state, 3))
-	carry := uint32(phpInt(state, 4))
-	d.n = int(phpInt(state, 7))
-	for i := 0; i < d.n; i++ {
-		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
-	}
+	var carry [4]uint32
+	carry[0] = uint32(phpInt(state, 4))
+	carry[1] = uint32(phpInt(state, 5))
+	carry[2] = uint32(phpInt(state, 6))
+	carry[3] = uint32(phpInt(state, 7))
 	d.len = uint32(phpInt(state, 8))
+	d.n = int(carry[3] & 0xf)
+	d.buf = [16]byte{}
+	nFull := d.n / 4
+	partial := d.n % 4
+	for i := 0; i < nFull; i++ {
+		binary.LittleEndian.PutUint32(d.buf[i*4:], carry[i])
+	}
+	if partial > 0 {
+		pk := carry[nFull]
+		for i := 0; i < partial; i++ {
+			d.buf[nFull*4+i] = byte(pk >> ((4 - partial + i) * 8))
+		}
+	}
 	return nil
 }
 
@@ -389,19 +416,36 @@ func (d *murmur3fDigest) Reset() {
 }
 func (d *murmur3fDigest) Clone() Hash    { c := *d; return &c }
 
-// PHP format: [h1_lo, h1_hi, h2_lo, h2_hi, ?, carry, carryLen, ?, totalLen] — 9 ints, no buffer.
-// carry = buf[0]<<8 | buf[1]<<16 | buf[2]<<24 ... (same encoding as murmur3c)
+// PHP format: [h[0]_lo, h[0]_hi, h[1]_lo, h[1]_hi, carry[0]_lo, carry[0]_hi,
+// carry[1]_lo, carry[1]_hi, len] — PHP_MURMUR3F_SPEC "qqqql", where each 64-bit
+// value is serialized as (lo, hi) int32 pair. The carry buffer is 16 bytes split
+// across 2 uint64s; a partial uint64 packs bytes toward the high end (byte i at
+// position (8-n_partial+i)). The low byte of carry[1] holds the carry length
+// (0..15), per PHP's pcarry[1] = (k2 & ~0xff) | n.
 func (d *murmur3fDigest) PHPAlgo() string { return "murmur3f" }
 func (d *murmur3fDigest) MarshalPHP() []any {
-	lo, hi := u64toi32pair(d.h1)
-	lo2, hi2 := u64toi32pair(d.h2)
-	var carry uint32
-	for i := 0; i < d.n; i++ {
-		carry |= uint32(d.buf[i]) << ((uint(i) + 1) * 8)
+	h1lo, h1hi := u64toi32pair(d.h1)
+	h2lo, h2hi := u64toi32pair(d.h2)
+	var carry [2]uint64
+	nFull := d.n / 8
+	partial := d.n % 8
+	for i := 0; i < nFull; i++ {
+		carry[i] = binary.LittleEndian.Uint64(d.buf[i*8:])
 	}
+	if partial > 0 {
+		var pk uint64
+		for i := 0; i < partial; i++ {
+			pk |= uint64(d.buf[nFull*8+i]) << ((8 - partial + i) * 8)
+		}
+		carry[nFull] = pk
+	}
+	carry[1] = (carry[1] &^ 0xff) | uint64(d.n)
+	c0lo, c0hi := u64toi32pair(carry[0])
+	c1lo, c1hi := u64toi32pair(carry[1])
 	return []any{
-		lo, hi, lo2, hi2,
-		int32(0), int32(carry), int32(d.n), int32(0), int32(d.len),
+		h1lo, h1hi, h2lo, h2hi,
+		c0lo, c0hi, c1lo, c1hi,
+		int32(d.len),
 	}
 }
 func (d *murmur3fDigest) UnmarshalPHP(state []any) error {
@@ -410,12 +454,23 @@ func (d *murmur3fDigest) UnmarshalPHP(state []any) error {
 	}
 	d.h1 = i32pairtou64(phpInt(state, 0), phpInt(state, 1))
 	d.h2 = i32pairtou64(phpInt(state, 2), phpInt(state, 3))
-	carry := uint32(phpInt(state, 5))
-	d.n = int(phpInt(state, 6))
-	for i := 0; i < d.n; i++ {
-		d.buf[i] = byte(carry >> ((uint(i) + 1) * 8))
-	}
+	var carry [2]uint64
+	carry[0] = i32pairtou64(phpInt(state, 4), phpInt(state, 5))
+	carry[1] = i32pairtou64(phpInt(state, 6), phpInt(state, 7))
 	d.len = uint64(uint32(phpInt(state, 8)))
+	d.n = int(carry[1] & 0xf)
+	d.buf = [16]byte{}
+	nFull := d.n / 8
+	partial := d.n % 8
+	for i := 0; i < nFull; i++ {
+		binary.LittleEndian.PutUint64(d.buf[i*8:], carry[i])
+	}
+	if partial > 0 {
+		pk := carry[nFull]
+		for i := 0; i < partial; i++ {
+			d.buf[nFull*8+i] = byte(pk >> ((8 - partial + i) * 8))
+		}
+	}
 	return nil
 }
 
