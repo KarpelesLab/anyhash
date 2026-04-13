@@ -32,6 +32,16 @@ type crc32MSB struct {
 // Pre-computed table for MSB-first CRC-32 with polynomial 0x04C11DB7.
 var crc32MSBTable [256]uint32
 
+// crc32MSBTable8 is the slicing-by-8 extension of crc32MSBTable.
+// T8[0][i] = T[i] (one MSB step with zero state, byte i in top position).
+// T8[k][i] = one additional zero-byte MSB step applied to T8[k-1][i].
+// The 8-byte update formula (after XOR-ing the first 4 input bytes into the
+// high end of the state) is:
+//
+//	s_new = T8[7][s>>24] ^ T8[6][(s>>16)&0xFF] ^ T8[5][(s>>8)&0xFF] ^ T8[4][s&0xFF] ^
+//	        T8[3][p[4]]  ^ T8[2][p[5]]          ^ T8[1][p[6]]        ^ T8[0][p[7]]
+var crc32MSBTable8 [8][256]uint32
+
 func init() {
 	const poly = 0x04C11DB7
 	for i := 0; i < 256; i++ {
@@ -45,6 +55,18 @@ func init() {
 		}
 		crc32MSBTable[i] = crc
 	}
+
+	// Build slicing-by-8 tables.
+	// T8[0] == T (the base table).
+	crc32MSBTable8[0] = crc32MSBTable
+	// Each subsequent table is one more zero-byte MSB step:
+	//   T8[k][i] = (T8[k-1][i] << 8) ^ T[T8[k-1][i] >> 24]
+	for k := 1; k < 8; k++ {
+		for i := 0; i < 256; i++ {
+			v := crc32MSBTable8[k-1][i]
+			crc32MSBTable8[k][i] = (v << 8) ^ crc32MSBTable[v>>24]
+		}
+	}
 }
 
 func newCRC32MSB() *crc32MSB {
@@ -57,12 +79,30 @@ func (c *crc32MSB) Reset()         { c.state = 0xFFFFFFFF }
 func (c *crc32MSB) Clone() Hash    { d := *c; return &d }
 
 func (c *crc32MSB) Write(p []byte) (int, error) {
+	n := len(p)
 	s := c.state
+	// Slicing-by-8: process 8 bytes per iteration.
+	// XOR the first 4 input bytes into the high end of the state, then
+	// combine 8 table lookups to advance by 8 bytes at once.
+	for len(p) >= 8 {
+		// Mix the first 4 input bytes into the state (big-endian / MSB-first).
+		s ^= uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3])
+		s = crc32MSBTable8[7][s>>24] ^
+			crc32MSBTable8[6][(s>>16)&0xFF] ^
+			crc32MSBTable8[5][(s>>8)&0xFF] ^
+			crc32MSBTable8[4][s&0xFF] ^
+			crc32MSBTable8[3][p[4]] ^
+			crc32MSBTable8[2][p[5]] ^
+			crc32MSBTable8[1][p[6]] ^
+			crc32MSBTable8[0][p[7]]
+		p = p[8:]
+	}
+	// Scalar tail for remaining bytes.
 	for _, b := range p {
 		s = (s << 8) ^ crc32MSBTable[(s>>24)^uint32(b)]
 	}
 	c.state = s
-	return len(p), nil
+	return n, nil
 }
 
 func (c *crc32MSB) PHPAlgo() string    { return "crc32" }

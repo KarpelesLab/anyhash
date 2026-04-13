@@ -191,58 +191,75 @@ func (d *whirlpoolDigest) Sum(in []byte) []byte {
 //	state = E(state, block) XOR state XOR block
 //
 // where E is the Whirlpool block cipher (W).
+//
+// The inner loops are fully unrolled so the compiler can keep all 8 state
+// words in registers and the (i±k)%8 modulo indices become compile-time
+// constants with no division or branch overhead.
 func whirlpoolProcessBlock(state *[8]uint64, block []byte) {
-	var blk [8]uint64
-	for i := 0; i < 8; i++ {
-		blk[i] = binary.BigEndian.Uint64(block[i*8:])
-	}
+	// Load block into locals (avoid repeated bounds checks below).
+	b0 := binary.BigEndian.Uint64(block[0:])
+	b1 := binary.BigEndian.Uint64(block[8:])
+	b2 := binary.BigEndian.Uint64(block[16:])
+	b3 := binary.BigEndian.Uint64(block[24:])
+	b4 := binary.BigEndian.Uint64(block[32:])
+	b5 := binary.BigEndian.Uint64(block[40:])
+	b6 := binary.BigEndian.Uint64(block[48:])
+	b7 := binary.BigEndian.Uint64(block[56:])
 
-	// K = state (the key schedule starts from the current hash state)
-	var K [8]uint64
-	copy(K[:], state[:])
+	// Key = current hash state.
+	K0, K1, K2, K3, K4, K5, K6, K7 := state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7]
 
-	// plaintext XOR key (initial AddRoundKey)
-	var s [8]uint64
-	for i := 0; i < 8; i++ {
-		s[i] = blk[i] ^ K[i]
-	}
+	// Initial AddRoundKey: plaintext XOR key.
+	s0 := b0 ^ K0
+	s1 := b1 ^ K1
+	s2 := b2 ^ K2
+	s3 := b3 ^ K3
+	s4 := b4 ^ K4
+	s5 := b5 ^ K5
+	s6 := b6 ^ K6
+	s7 := b7 ^ K7
 
-	// 10 rounds
-	var L [8]uint64
+	// 10 rounds — fully unrolled inner loops.
+	// Each round:
+	//   1. Key schedule: L = RoundFunction(K); L[0] ^= RC[r]; K = L
+	//   2. State update:  L = RoundFunction(s) XOR K; s = L
+	//
+	// RoundFunction row i uses columns (i, i-1, i-2, ..., i-7) mod 8
+	// from tables C0..C7 respectively.
+	var L0, L1, L2, L3, L4, L5, L6, L7 uint64
 	for r := 0; r < whirlpoolRounds; r++ {
-		// Compute round key: apply round function to K
-		for i := 0; i < 8; i++ {
-			L[i] = wpC0[byte(K[i]>>56)] ^
-				wpC1[byte(K[(i+7)%8]>>48)] ^
-				wpC2[byte(K[(i+6)%8]>>40)] ^
-				wpC3[byte(K[(i+5)%8]>>32)] ^
-				wpC4[byte(K[(i+4)%8]>>24)] ^
-				wpC5[byte(K[(i+3)%8]>>16)] ^
-				wpC6[byte(K[(i+2)%8]>>8)] ^
-				wpC7[byte(K[(i+1)%8])]
-		}
-		L[0] ^= wpRC[r]
-		copy(K[:], L[:])
+		// Key schedule (unrolled).
+		L0 = wpC0[K0>>56] ^ wpC1[K7>>48&0xff] ^ wpC2[K6>>40&0xff] ^ wpC3[K5>>32&0xff] ^ wpC4[K4>>24&0xff] ^ wpC5[K3>>16&0xff] ^ wpC6[K2>>8&0xff] ^ wpC7[K1&0xff] ^ wpRC[r]
+		L1 = wpC0[K1>>56] ^ wpC1[K0>>48&0xff] ^ wpC2[K7>>40&0xff] ^ wpC3[K6>>32&0xff] ^ wpC4[K5>>24&0xff] ^ wpC5[K4>>16&0xff] ^ wpC6[K3>>8&0xff] ^ wpC7[K2&0xff]
+		L2 = wpC0[K2>>56] ^ wpC1[K1>>48&0xff] ^ wpC2[K0>>40&0xff] ^ wpC3[K7>>32&0xff] ^ wpC4[K6>>24&0xff] ^ wpC5[K5>>16&0xff] ^ wpC6[K4>>8&0xff] ^ wpC7[K3&0xff]
+		L3 = wpC0[K3>>56] ^ wpC1[K2>>48&0xff] ^ wpC2[K1>>40&0xff] ^ wpC3[K0>>32&0xff] ^ wpC4[K7>>24&0xff] ^ wpC5[K6>>16&0xff] ^ wpC6[K5>>8&0xff] ^ wpC7[K4&0xff]
+		L4 = wpC0[K4>>56] ^ wpC1[K3>>48&0xff] ^ wpC2[K2>>40&0xff] ^ wpC3[K1>>32&0xff] ^ wpC4[K0>>24&0xff] ^ wpC5[K7>>16&0xff] ^ wpC6[K6>>8&0xff] ^ wpC7[K5&0xff]
+		L5 = wpC0[K5>>56] ^ wpC1[K4>>48&0xff] ^ wpC2[K3>>40&0xff] ^ wpC3[K2>>32&0xff] ^ wpC4[K1>>24&0xff] ^ wpC5[K0>>16&0xff] ^ wpC6[K7>>8&0xff] ^ wpC7[K6&0xff]
+		L6 = wpC0[K6>>56] ^ wpC1[K5>>48&0xff] ^ wpC2[K4>>40&0xff] ^ wpC3[K3>>32&0xff] ^ wpC4[K2>>24&0xff] ^ wpC5[K1>>16&0xff] ^ wpC6[K0>>8&0xff] ^ wpC7[K7&0xff]
+		L7 = wpC0[K7>>56] ^ wpC1[K6>>48&0xff] ^ wpC2[K5>>40&0xff] ^ wpC3[K4>>32&0xff] ^ wpC4[K3>>24&0xff] ^ wpC5[K2>>16&0xff] ^ wpC6[K1>>8&0xff] ^ wpC7[K0&0xff]
+		K0, K1, K2, K3, K4, K5, K6, K7 = L0, L1, L2, L3, L4, L5, L6, L7
 
-		// Apply round function to state
-		for i := 0; i < 8; i++ {
-			L[i] = wpC0[byte(s[i]>>56)] ^
-				wpC1[byte(s[(i+7)%8]>>48)] ^
-				wpC2[byte(s[(i+6)%8]>>40)] ^
-				wpC3[byte(s[(i+5)%8]>>32)] ^
-				wpC4[byte(s[(i+4)%8]>>24)] ^
-				wpC5[byte(s[(i+3)%8]>>16)] ^
-				wpC6[byte(s[(i+2)%8]>>8)] ^
-				wpC7[byte(s[(i+1)%8])] ^
-				K[i]
-		}
-		copy(s[:], L[:])
+		// State update (unrolled).
+		L0 = wpC0[s0>>56] ^ wpC1[s7>>48&0xff] ^ wpC2[s6>>40&0xff] ^ wpC3[s5>>32&0xff] ^ wpC4[s4>>24&0xff] ^ wpC5[s3>>16&0xff] ^ wpC6[s2>>8&0xff] ^ wpC7[s1&0xff] ^ K0
+		L1 = wpC0[s1>>56] ^ wpC1[s0>>48&0xff] ^ wpC2[s7>>40&0xff] ^ wpC3[s6>>32&0xff] ^ wpC4[s5>>24&0xff] ^ wpC5[s4>>16&0xff] ^ wpC6[s3>>8&0xff] ^ wpC7[s2&0xff] ^ K1
+		L2 = wpC0[s2>>56] ^ wpC1[s1>>48&0xff] ^ wpC2[s0>>40&0xff] ^ wpC3[s7>>32&0xff] ^ wpC4[s6>>24&0xff] ^ wpC5[s5>>16&0xff] ^ wpC6[s4>>8&0xff] ^ wpC7[s3&0xff] ^ K2
+		L3 = wpC0[s3>>56] ^ wpC1[s2>>48&0xff] ^ wpC2[s1>>40&0xff] ^ wpC3[s0>>32&0xff] ^ wpC4[s7>>24&0xff] ^ wpC5[s6>>16&0xff] ^ wpC6[s5>>8&0xff] ^ wpC7[s4&0xff] ^ K3
+		L4 = wpC0[s4>>56] ^ wpC1[s3>>48&0xff] ^ wpC2[s2>>40&0xff] ^ wpC3[s1>>32&0xff] ^ wpC4[s0>>24&0xff] ^ wpC5[s7>>16&0xff] ^ wpC6[s6>>8&0xff] ^ wpC7[s5&0xff] ^ K4
+		L5 = wpC0[s5>>56] ^ wpC1[s4>>48&0xff] ^ wpC2[s3>>40&0xff] ^ wpC3[s2>>32&0xff] ^ wpC4[s1>>24&0xff] ^ wpC5[s0>>16&0xff] ^ wpC6[s7>>8&0xff] ^ wpC7[s6&0xff] ^ K5
+		L6 = wpC0[s6>>56] ^ wpC1[s5>>48&0xff] ^ wpC2[s4>>40&0xff] ^ wpC3[s3>>32&0xff] ^ wpC4[s2>>24&0xff] ^ wpC5[s1>>16&0xff] ^ wpC6[s0>>8&0xff] ^ wpC7[s7&0xff] ^ K6
+		L7 = wpC0[s7>>56] ^ wpC1[s6>>48&0xff] ^ wpC2[s5>>40&0xff] ^ wpC3[s4>>32&0xff] ^ wpC4[s3>>24&0xff] ^ wpC5[s2>>16&0xff] ^ wpC6[s1>>8&0xff] ^ wpC7[s0&0xff] ^ K7
+		s0, s1, s2, s3, s4, s5, s6, s7 = L0, L1, L2, L3, L4, L5, L6, L7
 	}
 
 	// Miyaguchi-Preneel: new state = E(state, block) XOR state XOR block
-	for i := 0; i < 8; i++ {
-		state[i] ^= s[i] ^ blk[i]
-	}
+	state[0] ^= s0 ^ b0
+	state[1] ^= s1 ^ b1
+	state[2] ^= s2 ^ b2
+	state[3] ^= s3 ^ b3
+	state[4] ^= s4 ^ b4
+	state[5] ^= s5 ^ b5
+	state[6] ^= s6 ^ b6
+	state[7] ^= s7 ^ b7
 }
 
 // Whirlpool substitution box (version 3.0).

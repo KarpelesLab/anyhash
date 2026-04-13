@@ -454,6 +454,8 @@ func xxh3Accumulate(acc *[8]uint64, input []byte, secret []byte) {
 }
 
 func xxh3AccumulateStripe(acc *[8]uint64, input []byte, secret []byte) {
+	_ = input[63]
+	_ = secret[63]
 	for i := 0; i < 8; i++ {
 		val := binary.LittleEndian.Uint64(input[i*8:])
 		key := binary.LittleEndian.Uint64(secret[i*8:])
@@ -464,6 +466,7 @@ func xxh3AccumulateStripe(acc *[8]uint64, input []byte, secret []byte) {
 }
 
 func xxh3ScrambleAcc(acc *[8]uint64, secret []byte) {
+	_ = secret[63]
 	for i := 0; i < 8; i++ {
 		key := binary.LittleEndian.Uint64(secret[i*8:])
 		acc[i] = (acc[i] ^ (acc[i] >> 47) ^ key) * uint64(xxh32p1)

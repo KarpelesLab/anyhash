@@ -175,6 +175,7 @@ func tigerKeySchedule(x *[8]uint64) {
 }
 
 func tigerCompress(s *[3]uint64, block []byte, passes int) {
+	_ = block[63]
 	var x [8]uint64
 	for i := 0; i < 8; i++ {
 		x[i] = binary.LittleEndian.Uint64(block[i*8:])
