@@ -9,14 +9,13 @@ package anyhash
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 )
 
 const (
 	snefruRounds    = 8
 	snefruInputSize = 16 // 16 words = 512 bits total block
 )
-
-var snefruShiftTable = [4]uint32{16, 8, 16, 24}
 
 func init() {
 	registerHash("snefru", func() Hash { return newSnefru(8) })
@@ -170,36 +169,80 @@ func (d *snefruDigest) processBlock(data []byte) {
 	}
 
 	// Save original state for final XOR.
-	var orig [16]uint32
-	copy(orig[:], w[:])
+	orig := w
 
-	// Apply snefruRounds rounds.
+	// Apply snefruRounds rounds. The rotate amounts [16, 8, 16, 24] inside the
+	// 4-pass inner loop are surfaced as compile-time constants in the switch
+	// below so the compiler emits a single ROR per word instead of a
+	// register-held shift+or. The S-box pass is inlined (rather than factored
+	// into a helper) to avoid call overhead on this critical inner sequence.
 	for round := 0; round < snefruRounds; round++ {
-		sbox0 := &snefruSBox[2*round]
-		sbox1 := &snefruSBox[2*round+1]
+		s0 := &snefruSBox[2*round]
+		s1 := &snefruSBox[2*round+1]
 
-		for byteInWord := 0; byteInWord < 4; byteInWord++ {
-			// For each of the 16 words, do the S-box substitution.
-			// word i uses sbox0 if (i/2) is even, sbox1 if (i/2) is odd.
-			// SBoxEntry = standardSBoxes[2*index + ((i/2) & 1)][block[i] & 0xff]
-			// block[next] ^= SBoxEntry; block[last] ^= SBoxEntry
-			for i := 0; i < 16; i++ {
-				next := (i + 1) & 0x0f
-				last := (i + 15) & 0x0f
-				var sbe uint32
-				if (i/2)&1 == 0 {
-					sbe = sbox0[w[i]&0xff]
-				} else {
-					sbe = sbox1[w[i]&0xff]
+		for pass := 0; pass < 4; pass++ {
+			sbe := s0[w[0]&0xff]
+			w[1] ^= sbe
+			w[15] ^= sbe
+			sbe = s0[w[1]&0xff]
+			w[2] ^= sbe
+			w[0] ^= sbe
+			sbe = s1[w[2]&0xff]
+			w[3] ^= sbe
+			w[1] ^= sbe
+			sbe = s1[w[3]&0xff]
+			w[4] ^= sbe
+			w[2] ^= sbe
+			sbe = s0[w[4]&0xff]
+			w[5] ^= sbe
+			w[3] ^= sbe
+			sbe = s0[w[5]&0xff]
+			w[6] ^= sbe
+			w[4] ^= sbe
+			sbe = s1[w[6]&0xff]
+			w[7] ^= sbe
+			w[5] ^= sbe
+			sbe = s1[w[7]&0xff]
+			w[8] ^= sbe
+			w[6] ^= sbe
+			sbe = s0[w[8]&0xff]
+			w[9] ^= sbe
+			w[7] ^= sbe
+			sbe = s0[w[9]&0xff]
+			w[10] ^= sbe
+			w[8] ^= sbe
+			sbe = s1[w[10]&0xff]
+			w[11] ^= sbe
+			w[9] ^= sbe
+			sbe = s1[w[11]&0xff]
+			w[12] ^= sbe
+			w[10] ^= sbe
+			sbe = s0[w[12]&0xff]
+			w[13] ^= sbe
+			w[11] ^= sbe
+			sbe = s0[w[13]&0xff]
+			w[14] ^= sbe
+			w[12] ^= sbe
+			sbe = s1[w[14]&0xff]
+			w[15] ^= sbe
+			w[13] ^= sbe
+			sbe = s1[w[15]&0xff]
+			w[0] ^= sbe
+			w[14] ^= sbe
+
+			switch pass {
+			case 0, 2:
+				for i := 0; i < 16; i++ {
+					w[i] = bits.RotateLeft32(w[i], -16)
 				}
-				w[next] ^= sbe
-				w[last] ^= sbe
-			}
-
-			// Rotate right all words.
-			shift := snefruShiftTable[byteInWord]
-			for i := 0; i < 16; i++ {
-				w[i] = (w[i] >> shift) | (w[i] << (32 - shift))
+			case 1:
+				for i := 0; i < 16; i++ {
+					w[i] = bits.RotateLeft32(w[i], -8)
+				}
+			case 3:
+				for i := 0; i < 16; i++ {
+					w[i] = bits.RotateLeft32(w[i], -24)
+				}
 			}
 		}
 	}
@@ -210,6 +253,7 @@ func (d *snefruDigest) processBlock(data []byte) {
 		d.state[i] = orig[i] ^ w[15-i]
 	}
 }
+
 
 var snefruSBox = [16][256]uint32{
 	{ // S-Box 0

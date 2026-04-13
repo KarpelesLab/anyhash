@@ -5,11 +5,35 @@ package anyhash
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
+)
+
+var (
+	gostTestSboxT      = buildGostSboxTables(&gostTestSbox)
+	gostCryptoProSboxT = buildGostSboxTables(&gostCryptoProSbox)
 )
 
 func init() {
-	registerHash("gost", func() Hash { return newGOST(&gostTestSbox, "gost") })
-	registerHash("gostcrypto", func() Hash { return newGOST(&gostCryptoProSbox, "gost-crypto") })
+	registerHash("gost", func() Hash { return newGOST(gostTestSboxT, "gost") })
+	registerHash("gostcrypto", func() Hash { return newGOST(gostCryptoProSboxT, "gost-crypto") })
+}
+
+// gostSboxTables holds the precomputed 4×256 lookup tables that fold the GOST
+// S-box substitution with the 11-bit left rotation into a single uint32
+// lookup per input byte.
+type gostSboxTables [4][256]uint32
+
+func buildGostSboxTables(s *gostSbox) *gostSboxTables {
+	var t gostSboxTables
+	for k := 0; k < 4; k++ {
+		for b := 0; b < 256; b++ {
+			lo := uint32(s[2*k][b&0x0f])
+			hi := uint32(s[2*k+1][b>>4])
+			v := ((hi << 4) | lo) << (uint(k) * 8)
+			t[k][b] = bits.RotateLeft32(v, 11)
+		}
+	}
+	return &t
 }
 
 // S-box tables for GOST 28147-89, each row maps 4 bits to 4 bits.
@@ -43,11 +67,11 @@ type gostDigest struct {
 	buf     [32]byte
 	bufLen  int
 	length  uint64
-	sbox    *gostSbox
+	sbox    *gostSboxTables
 	phpAlgo string
 }
 
-func newGOST(sbox *gostSbox, phpAlgo string) *gostDigest {
+func newGOST(sbox *gostSboxTables, phpAlgo string) *gostDigest {
 	return &gostDigest{sbox: sbox, phpAlgo: phpAlgo}
 }
 
@@ -177,7 +201,7 @@ func gostAddBlocks(acc *[32]byte, block []byte) {
 
 // gostEncrypt performs GOST 28147-89 encryption of a single 64-bit block
 // with a 256-bit key.
-func gostEncrypt(block *[8]byte, key *[32]byte, sbox *gostSbox) {
+func gostEncrypt(block *[8]byte, key *[32]byte, sbox *gostSboxTables) {
 	n1 := binary.LittleEndian.Uint32(block[0:4])
 	n2 := binary.LittleEndian.Uint32(block[4:8])
 
@@ -201,22 +225,18 @@ func gostEncrypt(block *[8]byte, key *[32]byte, sbox *gostSbox) {
 	binary.LittleEndian.PutUint32(block[4:8], n1)
 }
 
-// gostRound performs one round of GOST 28147-89.
-func gostRound(n1, n2, key uint32, sbox *gostSbox) (uint32, uint32) {
+// gostRound performs one round of GOST 28147-89 using the folded
+// S-box+rotate tables. Each uint32 load already includes the 11-bit left
+// rotation, so a simple OR across four byte-indexed lookups replaces eight
+// variable-shift 4-bit substitutions followed by a rotate.
+func gostRound(n1, n2, key uint32, t *gostSboxTables) (uint32, uint32) {
 	tmp := n1 + key
-	// S-box substitution: process 4 bits at a time.
-	var result uint32
-	for i := 0; i < 8; i++ {
-		result |= uint32(sbox[i][(tmp>>(4*uint(i)))&0x0f]) << (4 * uint(i))
-	}
-	// Rotate left 11 bits.
-	result = (result << 11) | (result >> 21)
-	// XOR with n2 and swap.
+	result := t[0][tmp&0xff] | t[1][(tmp>>8)&0xff] | t[2][(tmp>>16)&0xff] | t[3][(tmp>>24)&0xff]
 	return n2 ^ result, n1
 }
 
 // gostCompress performs the GOST R 34.11-94 compression function: h = f(h, m).
-func gostCompress(h *[32]byte, m []byte, sbox *gostSbox) {
+func gostCompress(h *[32]byte, m []byte, sbox *gostSboxTables) {
 	// Step 1: Generate keys.
 	// u = h, v = m
 	var u, v [32]byte
@@ -257,7 +277,7 @@ func gostCompress(h *[32]byte, m []byte, sbox *gostSbox) {
 	}
 
 	// Step 3: Shuffle.
-	gostShuffle(&s, h, m)
+	gostShuffle64(&s, h, m)
 	copy(h[:], s[:])
 }
 
@@ -319,59 +339,55 @@ func xor32Bytes(dst *[32]byte, src []byte) {
 	}
 }
 
-// gostShuffle is the final step of the compression function (psi^61 applied).
-// s = psi^61(h XOR psi(m XOR psi^12(s)))
-func gostShuffle(s *[32]byte, h *[32]byte, m []byte) {
-	// Compute psi^12(s).
-	var tmp [32]byte
-	copy(tmp[:], s[:])
+// gostShuffle64 implements the final step of the compression function
+// (s = psi^61(h XOR psi(m XOR psi^12(s)))) on four uint64 registers, folding
+// the 74 gostPsi iterations, two 32-byte XORs, and the intermediate loads/stores
+// 74 gostPsi iterations, two 32-byte XORs, and the intermediate loads/stores
+// into a single load-process-store sequence. Each gostPsi becomes 4 shift+or
+// ops over uint64s instead of a 30-byte memmove.
+func gostShuffle64(s *[32]byte, h *[32]byte, m []byte) {
+	a := binary.LittleEndian.Uint64(s[0:8])
+	b := binary.LittleEndian.Uint64(s[8:16])
+	c := binary.LittleEndian.Uint64(s[16:24])
+	d := binary.LittleEndian.Uint64(s[24:32])
+
 	for i := 0; i < 12; i++ {
-		gostPsi(&tmp)
+		a, b, c, d = gostPsi64(a, b, c, d)
 	}
 
-	// XOR with m.
-	for i := 0; i < 32; i++ {
-		tmp[i] ^= m[i]
-	}
+	a ^= binary.LittleEndian.Uint64(m[0:8])
+	b ^= binary.LittleEndian.Uint64(m[8:16])
+	c ^= binary.LittleEndian.Uint64(m[16:24])
+	d ^= binary.LittleEndian.Uint64(m[24:32])
 
-	// Apply psi.
-	gostPsi(&tmp)
+	a, b, c, d = gostPsi64(a, b, c, d)
 
-	// XOR with h.
-	for i := 0; i < 32; i++ {
-		tmp[i] ^= h[i]
-	}
+	a ^= binary.LittleEndian.Uint64(h[0:8])
+	b ^= binary.LittleEndian.Uint64(h[8:16])
+	c ^= binary.LittleEndian.Uint64(h[16:24])
+	d ^= binary.LittleEndian.Uint64(h[24:32])
 
-	// Apply psi^61.
 	for i := 0; i < 61; i++ {
-		gostPsi(&tmp)
+		a, b, c, d = gostPsi64(a, b, c, d)
 	}
 
-	copy(s[:], tmp[:])
+	binary.LittleEndian.PutUint64(s[0:8], a)
+	binary.LittleEndian.PutUint64(s[8:16], b)
+	binary.LittleEndian.PutUint64(s[16:24], c)
+	binary.LittleEndian.PutUint64(s[24:32], d)
 }
 
-// gostPsi is the psi (linear feedback) transformation on a 256-bit value
-// viewed as 16 x 16-bit words.
-// psi(Gamma) = Gamma[0] XOR Gamma[1] XOR Gamma[2] XOR Gamma[3] XOR Gamma[12] XOR Gamma[15]
-//
-//	|| Gamma[0] || Gamma[1] || ... || Gamma[14]
-//
-// i.e., shift the 16-bit words left by one and put the LFSR output in front.
-func gostPsi(data *[32]byte) {
-	// Read 16 words of 16 bits each (little-endian).
-	var g [16]uint16
-	for i := 0; i < 16; i++ {
-		g[i] = binary.LittleEndian.Uint16(data[i*2 : i*2+2])
-	}
+// gostPsi64 is gostPsi applied to four little-endian uint64 words. Each uint64
+// holds four 16-bit words; psi shifts the stream left by one 16-bit word and
+// feeds the top slot with the XOR of words 0,1,2,3,12,15.
+func gostPsi64(a, b, c, d uint64) (uint64, uint64, uint64, uint64) {
+	// Words 0..3 live in a; fold them into the low 16 bits via xor-shift.
+	newWord := (a ^ (a >> 16) ^ (a >> 32) ^ (a >> 48)) & 0xffff
+	newWord ^= d & 0xffff         // word 12
+	newWord ^= (d >> 48) & 0xffff // word 15
 
-	newWord := g[0] ^ g[1] ^ g[2] ^ g[3] ^ g[12] ^ g[15]
-
-	// Shift all words: g[i] = g[i+1], then g[15] = newWord.
-	copy(g[0:15], g[1:16])
-	g[15] = newWord
-
-	// Write back.
-	for i := 0; i < 16; i++ {
-		binary.LittleEndian.PutUint16(data[i*2:i*2+2], g[i])
-	}
+	return (a >> 16) | (b << 48),
+		(b >> 16) | (c << 48),
+		(c >> 16) | (d << 48),
+		(d >> 16) | (newWord << 48)
 }
