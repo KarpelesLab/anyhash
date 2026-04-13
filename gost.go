@@ -201,30 +201,6 @@ func gostAddBlocks(acc *[32]byte, block []byte) {
 
 // gostEncrypt performs GOST 28147-89 encryption of a single 64-bit block
 // with a 256-bit key.
-func gostEncrypt(block *[8]byte, key *[32]byte, sbox *gostSboxTables) {
-	n1 := binary.LittleEndian.Uint32(block[0:4])
-	n2 := binary.LittleEndian.Uint32(block[4:8])
-
-	// Load key as 8 x 32-bit words (little-endian).
-	var k [8]uint32
-	for i := 0; i < 8; i++ {
-		k[i] = binary.LittleEndian.Uint32(key[i*4 : i*4+4])
-	}
-
-	// 24 rounds with keys in order k[0..7] repeated 3 times,
-	// then 8 rounds with keys in reverse order k[7..0].
-	for i := 0; i < 24; i++ {
-		n1, n2 = gostRound(n1, n2, k[i%8], sbox)
-	}
-	for i := 7; i >= 0; i-- {
-		n1, n2 = gostRound(n1, n2, k[i], sbox)
-	}
-
-	// Swap halves (no swap after last round — done by swapping output).
-	binary.LittleEndian.PutUint32(block[0:4], n2)
-	binary.LittleEndian.PutUint32(block[4:8], n1)
-}
-
 // gostRound performs one round of GOST 28147-89 using the folded
 // S-box+rotate tables. Each uint32 load already includes the 11-bit left
 // rotation, so a simple OR across four byte-indexed lookups replaces eight
@@ -236,68 +212,82 @@ func gostRound(n1, n2, key uint32, t *gostSboxTables) (uint32, uint32) {
 }
 
 // gostCompress performs the GOST R 34.11-94 compression function: h = f(h, m).
+// All 256-bit values are represented as [4]uint64 to avoid byte-level copies
+// and XORs; the key schedule produces [8]uint32 directly for gostEncrypt.
 func gostCompress(h *[32]byte, m []byte, sbox *gostSboxTables) {
-	// Step 1: Generate keys.
-	// u = h, v = m
-	var u, v [32]byte
-	copy(u[:], h[:])
-	copy(v[:], m)
-
-	// w = u XOR v
-	var w [32]byte
-	xor32(&w, &u, &v)
-
-	// Generate 4 keys (k1..k4), each 32 bytes.
-	var keys [4][32]byte
-	gostKeySchedule(&keys[0], &w)
-
-	// For keys 2..4 we need transformations of u and v.
-	for i := 1; i < 4; i++ {
-		gostTransformA(&u)
-		if i == 2 {
-			// After step 2, XOR u with C constants.
-			xor32Bytes(&u, gostC[:])
-		}
-		gostTransformA(&v)
-		gostTransformA(&v)
-		xor32(&w, &u, &v)
-		gostKeySchedule(&keys[i], &w)
+	u := load64s(h)
+	v := [4]uint64{
+		binary.LittleEndian.Uint64(m[0:]),
+		binary.LittleEndian.Uint64(m[8:]),
+		binary.LittleEndian.Uint64(m[16:]),
+		binary.LittleEndian.Uint64(m[24:]),
 	}
 
-	// Step 2: Encrypt h using keys.
-	// Split h into four 8-byte blocks, encrypt each with corresponding key.
+	w := xor64s(u, v)
+	keys0 := gostKeySchedule64(w)
+
+	transformA64(&u)
+	transformA64(&v)
+	transformA64(&v)
+	w = xor64s(u, v)
+	keys1 := gostKeySchedule64(w)
+
+	transformA64(&u)
+	u[0] ^= gostCU[0]
+	u[1] ^= gostCU[1]
+	u[2] ^= gostCU[2]
+	u[3] ^= gostCU[3]
+	transformA64(&v)
+	transformA64(&v)
+	w = xor64s(u, v)
+	keys2 := gostKeySchedule64(w)
+
+	transformA64(&u)
+	transformA64(&v)
+	transformA64(&v)
+	w = xor64s(u, v)
+	keys3 := gostKeySchedule64(w)
+
+	// Encrypt h using keys — operate on 8-byte blocks.
 	var s [32]byte
 	copy(s[:], h[:])
+	gostEncrypt64((*[8]byte)(s[0:8]), &keys0, sbox)
+	gostEncrypt64((*[8]byte)(s[8:16]), &keys1, sbox)
+	gostEncrypt64((*[8]byte)(s[16:24]), &keys2, sbox)
+	gostEncrypt64((*[8]byte)(s[24:32]), &keys3, sbox)
 
-	for i := 0; i < 4; i++ {
-		var block [8]byte
-		copy(block[:], s[i*8:i*8+8])
-		gostEncrypt(&block, &keys[i], sbox)
-		copy(s[i*8:i*8+8], block[:])
-	}
-
-	// Step 3: Shuffle.
 	gostShuffle64(&s, h, m)
 	copy(h[:], s[:])
 }
 
-// gostKeySchedule applies the P-permutation to w, producing a 256-bit key.
-func gostKeySchedule(k *[32]byte, w *[32]byte) {
-	for i := 0; i < 32; i++ {
-		k[i] = w[gostKeyPerm[i]]
+func load64s(p *[32]byte) [4]uint64 {
+	return [4]uint64{
+		binary.LittleEndian.Uint64(p[0:]),
+		binary.LittleEndian.Uint64(p[8:]),
+		binary.LittleEndian.Uint64(p[16:]),
+		binary.LittleEndian.Uint64(p[24:]),
 	}
 }
 
-// gostKeyPerm is the byte permutation for key schedule.
-var gostKeyPerm = [32]byte{
-	0, 8, 16, 24,
-	1, 9, 17, 25,
-	2, 10, 18, 26,
-	3, 11, 19, 27,
-	4, 12, 20, 28,
-	5, 13, 21, 29,
-	6, 14, 22, 30,
-	7, 15, 23, 31,
+func xor64s(a, b [4]uint64) [4]uint64 {
+	return [4]uint64{a[0] ^ b[0], a[1] ^ b[1], a[2] ^ b[2], a[3] ^ b[3]}
+}
+
+// transformA64 is A(x) = x2 || x3 || x4 || (x1 ^ x2) on 4 uint64s.
+func transformA64(x *[4]uint64) {
+	x0 := x[0]
+	x[0] = x[1]
+	x[1] = x[2]
+	x[2] = x[3]
+	x[3] = x0 ^ x[0]
+}
+
+// gostCU is gostC preloaded as uint64s.
+var gostCU = [4]uint64{
+	binary.LittleEndian.Uint64(gostC[0:]),
+	binary.LittleEndian.Uint64(gostC[8:]),
+	binary.LittleEndian.Uint64(gostC[16:]),
+	binary.LittleEndian.Uint64(gostC[24:]),
 }
 
 // gostC is the constant used in key generation step 3.
@@ -308,35 +298,46 @@ var gostC = [32]byte{
 	0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0xff,
 }
 
-// gostTransformA is the A transformation on a 256-bit value viewed as
-// four 64-bit (8-byte) chunks: x = x1 || x2 || x3 || x4.
-// A(x) = x2 || x3 || x4 || (x1 ^ x2)
-func gostTransformA(x *[32]byte) {
-	var x1, x2 [8]byte
-	copy(x1[:], x[0:8])
-	copy(x2[:], x[8:16])
-
-	// Shift: move bytes 8..31 to 0..23.
-	copy(x[0:24], x[8:32])
-
-	// Last 8 bytes = x1 XOR x2.
-	for i := 0; i < 8; i++ {
-		x[24+i] = x1[i] ^ x2[i]
+// gostKeySchedule64 applies the P-permutation (4×8 byte matrix transpose) and
+// returns the result as 8 uint32 keys ready for gostEncrypt. The permutation
+// maps byte j of the output to byte gostKeyPerm[j] of the input, which
+// transposes rows and columns: key_word[c] = w_byte[c] | w_byte[c+8]<<8 |
+// w_byte[c+16]<<16 | w_byte[c+24]<<24.
+func gostKeySchedule64(w [4]uint64) [8]uint32 {
+	var k [8]uint32
+	for c := 0; c < 8; c++ {
+		k[c] = uint32(byte(w[0]>>uint(c*8))) |
+			uint32(byte(w[1]>>uint(c*8)))<<8 |
+			uint32(byte(w[2]>>uint(c*8)))<<16 |
+			uint32(byte(w[3]>>uint(c*8)))<<24
 	}
+	return k
 }
 
-// xor32 computes dst = a XOR b for 32 bytes.
-func xor32(dst, a, b *[32]byte) {
-	for i := 0; i < 32; i++ {
-		dst[i] = a[i] ^ b[i]
+// gostEncrypt64 is gostEncrypt taking precomputed uint32 keys.
+func gostEncrypt64(block *[8]byte, k *[8]uint32, sbox *gostSboxTables) {
+	n1 := binary.LittleEndian.Uint32(block[0:4])
+	n2 := binary.LittleEndian.Uint32(block[4:8])
+	for pass := 0; pass < 3; pass++ {
+		n1, n2 = gostRound(n1, n2, k[0], sbox)
+		n1, n2 = gostRound(n1, n2, k[1], sbox)
+		n1, n2 = gostRound(n1, n2, k[2], sbox)
+		n1, n2 = gostRound(n1, n2, k[3], sbox)
+		n1, n2 = gostRound(n1, n2, k[4], sbox)
+		n1, n2 = gostRound(n1, n2, k[5], sbox)
+		n1, n2 = gostRound(n1, n2, k[6], sbox)
+		n1, n2 = gostRound(n1, n2, k[7], sbox)
 	}
-}
-
-// xor32Bytes XORs 32 bytes from src into dst.
-func xor32Bytes(dst *[32]byte, src []byte) {
-	for i := 0; i < 32; i++ {
-		dst[i] ^= src[i]
-	}
+	n1, n2 = gostRound(n1, n2, k[7], sbox)
+	n1, n2 = gostRound(n1, n2, k[6], sbox)
+	n1, n2 = gostRound(n1, n2, k[5], sbox)
+	n1, n2 = gostRound(n1, n2, k[4], sbox)
+	n1, n2 = gostRound(n1, n2, k[3], sbox)
+	n1, n2 = gostRound(n1, n2, k[2], sbox)
+	n1, n2 = gostRound(n1, n2, k[1], sbox)
+	n1, n2 = gostRound(n1, n2, k[0], sbox)
+	binary.LittleEndian.PutUint32(block[0:4], n2)
+	binary.LittleEndian.PutUint32(block[4:8], n1)
 }
 
 // gostShuffle64 implements the final step of the compression function
