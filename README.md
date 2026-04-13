@@ -86,6 +86,51 @@ func main() {
 | xxHash | xxh32, xxh64, xxh3, xxh128 |
 | Other | joaat |
 
+## Performance
+
+Throughput on 64 KiB payloads (Intel i9-14900K, Go 1.25, single core):
+
+| Algorithm | Throughput | Notes |
+|-----------|-----------|-------|
+| crc32b, crc32c | 42 GB/s | Go stdlib, hardware CRC |
+| xxh64 | 21 GB/s | |
+| xxh32 | 11 GB/s | |
+| murmur3f | 7.6 GB/s | |
+| xxh3, xxh128 | 5.3 GB/s | |
+| adler32 | 5.2 GB/s | Go stdlib |
+| murmur3c | 5.0 GB/s | |
+| murmur3a | 4.2 GB/s | |
+| sha1 | 3.0 GB/s | Go stdlib, asm-accelerated |
+| crc32 | 2.8 GB/s | MSB-first, slicing-by-8 |
+| sha256, sha224 | 2.8 GB/s | Go stdlib, asm-accelerated |
+| fnv132, fnv1a32, fnv164, fnv1a64 | 1.4 GB/s | Go stdlib |
+| md5 | 1.3 GB/s | Go stdlib |
+| md4 | 1.1 GB/s | |
+| joaat | 1.1 GB/s | |
+| sha512, sha384 | 1.1 GB/s | Go stdlib, asm-accelerated |
+| tiger | 810 MB/s | |
+| sha3-224 | 711 MB/s | |
+| sha3-256 | 678 MB/s | |
+| haval (3 pass) | 654 MB/s | |
+| sha3-384 | 523 MB/s | |
+| haval (4 pass) | 475 MB/s | |
+| haval (5 pass) | 396 MB/s | |
+| ripemd128 | 380 MB/s | |
+| sha3-512 | 364 MB/s | |
+| ripemd256 | 351 MB/s | |
+| whirlpool | 306 MB/s | |
+| ripemd160 | 255 MB/s | |
+| ripemd320 | 225 MB/s | |
+| gost, gost-crypto | 64 MB/s | |
+| snefru, snefru256 | 49 MB/s | |
+| md2 | 17 MB/s | |
+
+Run benchmarks yourself with:
+
+```bash
+go test -run=^$ -bench=BenchmarkHash -benchtime=1s ./...
+```
+
 ## API
 
 ```go
